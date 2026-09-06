@@ -1,4 +1,4 @@
-const CACHE_NAME = 'kizen-app-v3';
+const CACHE_NAME = 'kizen-app-v4';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
@@ -24,6 +24,12 @@ const ASSETS_TO_CACHE = [
   './js/views/journalView.js',
   './js/views/statsView.js'
 ];
+
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+});
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
