@@ -22,17 +22,19 @@ window.addEventListener('beforeinstallprompt', (e) => {
   window.deferredPwaPrompt = e;
 });
 
-document.addEventListener('DOMContentLoaded', async () => {
-  // Register Service Worker for offline PWA with automatic updates
+async function initApp() {
+  // 1. Setup UI Navigation, Modals & Toasts immediately so buttons work instantly
+  setupNavigation();
+  setupModals();
+  setupToastNotifications();
+
+  // 2. Register Service Worker with forced update
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('./sw.js').then((reg) => {
-      // Force check for updates every time app opens
       reg.update();
-
       if (reg.waiting) {
         reg.waiting.postMessage({ type: 'SKIP_WAITING' });
       }
-
       reg.addEventListener('updatefound', () => {
         const newWorker = reg.installing;
         if (newWorker) {
@@ -56,20 +58,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  // Initialize Store, Database & Notifications
-  await store.init();
-  notificationEngine.initScheduler();
+  // 3. Initialize Store & Data safely
+  try {
+    await store.init();
+    notificationEngine.initScheduler();
+    setupHeaderStatus();
+  } catch (err) {
+    console.error('Error initializing store:', err);
+  }
 
-  // Setup UI Navigation & Modals
-  setupNavigation();
-  setupHeaderStatus();
-  setupModals();
-  setupToastNotifications();
-
-  // Initial View Render
+  // 4. Render active view
   switchView('daily');
 
-  // Listen to store updates
+  // 5. Store subscription
   store.subscribe((event, data) => {
     updateHeaderStatus();
     if (event === 'xp-gained') {
@@ -86,10 +87,16 @@ document.addEventListener('DOMContentLoaded', async () => {
       showToast(`🛡️ Escudo de racha recargado (${data.freezeTokens} disponibles)`, 'xp');
     }
 
-    // Re-render current active view if appropriate
     renderActiveView();
   });
-});
+}
+
+// Bulletproof execution for both direct load and deferred module execution
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initApp);
+} else {
+  initApp();
+}
 
 function setupNavigation() {
   const navButtons = document.querySelectorAll('.nav-item');
