@@ -1,6 +1,6 @@
 /**
  * KIZEN NOTIFICATION & REVIEW REMINDER ENGINE (js/notifications.js)
- * Manages Web Notifications, permission workflows, and scheduled review prompts.
+ * Manages Web Notifications, permission workflows, service worker display, and scheduled review prompts.
  */
 
 class NotificationEngine {
@@ -12,16 +12,26 @@ class NotificationEngine {
   loadSettings() {
     try {
       const saved = localStorage.getItem('kizen_notification_settings');
-      return saved ? JSON.parse(saved) : {
+      const defaults = {
         enabled: false,
+        dailyReminderEnabled: true,
         dailyReminderTime: '09:00',
         weeklyReviewDay: 0, // 0 = Sunday
         weeklyReviewTime: '18:00',
         monthlyReviewDay: 1, // 1st of month
         monthlyReviewTime: '10:00'
       };
+      return saved ? { ...defaults, ...JSON.parse(saved) } : defaults;
     } catch (e) {
-      return { enabled: false };
+      return {
+        enabled: false,
+        dailyReminderEnabled: true,
+        dailyReminderTime: '09:00',
+        weeklyReviewDay: 0,
+        weeklyReviewTime: '18:00',
+        monthlyReviewDay: 1,
+        monthlyReviewTime: '10:00'
+      };
     }
   }
 
@@ -29,33 +39,52 @@ class NotificationEngine {
     this.settings = { ...this.settings, ...newSettings };
     localStorage.setItem('kizen_notification_settings', JSON.stringify(this.settings));
     this.initScheduler();
+    return this.settings;
   }
 
-  async requestPermission() {
+  async toggleEnabled() {
     if (!('Notification' in window)) {
-      alert('This browser does not support web notifications.');
+      alert('Tu navegador no soporta notificaciones web.');
+      return false;
+    }
+
+    if (this.settings.enabled) {
+      this.saveSettings({ enabled: false });
       return false;
     }
 
     if (Notification.permission === 'granted') {
       this.saveSettings({ enabled: true });
+      this.sendNotification('⚡ Notificaciones Kizen Activadas', {
+        body: 'Recordatorios diarios y revisiones programadas correctamente.'
+      });
       return true;
     }
 
     const permission = await Notification.requestPermission();
     if (permission === 'granted') {
       this.saveSettings({ enabled: true });
-      this.sendNotification('⚡ Kizen Notifications Activated', {
-        body: 'You will receive reminders for Weekly and Monthly reviews.'
+      this.sendNotification('⚡ Notificaciones Kizen Activadas', {
+        body: 'Recordatorios diarios y revisiones programadas correctamente.'
       });
       return true;
     } else {
       this.saveSettings({ enabled: false });
+      alert('El permiso para notificaciones no fue concedido en tu navegador.');
       return false;
     }
   }
 
+  async requestPermission() {
+    return await this.toggleEnabled();
+  }
+
   sendNotification(title, options = {}) {
+    // In-app visual notification fallback always triggers
+    window.dispatchEvent(new CustomEvent('kizen-show-toast', {
+      detail: { message: `🔔 ${title}: ${options.body || ''}`, type: 'xp' }
+    }));
+
     if (!('Notification' in window) || Notification.permission !== 'granted') {
       return;
     }
@@ -63,16 +92,21 @@ class NotificationEngine {
     const defaultOptions = {
       icon: './icons/icon-192.png',
       badge: './icons/icon-192.png',
-      vibrate: [200, 100, 200]
+      vibrate: [200, 100, 200],
+      tag: 'kizen-notification'
     };
 
+    const finalOptions = { ...defaultOptions, ...options };
+
     try {
-      if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+      if ('serviceWorker' in navigator) {
         navigator.serviceWorker.ready.then((registration) => {
-          registration.showNotification(title, { ...defaultOptions, ...options });
+          registration.showNotification(title, finalOptions);
+        }).catch(() => {
+          try { new Notification(title, finalOptions); } catch (err) {}
         });
       } else {
-        new Notification(title, { ...defaultOptions, ...options });
+        new Notification(title, finalOptions);
       }
     } catch (e) {
       console.warn('Notification error:', e);
@@ -84,16 +118,16 @@ class NotificationEngine {
       clearInterval(this.timer);
     }
 
-    // Check periodically every 60 seconds
+    // Check periodically every 45 seconds
     this.timer = setInterval(() => {
       this.checkScheduledReminders();
-    }, 60000);
+    }, 45000);
 
     this.checkScheduledReminders();
   }
 
   checkScheduledReminders() {
-    if (!this.settings.enabled || Notification.permission !== 'granted') {
+    if (!this.settings.enabled) {
       return;
     }
 
@@ -111,20 +145,31 @@ class NotificationEngine {
       return; // Already triggered in this minute
     }
 
-    // 1. Weekly Review Reminder (e.g. Sunday 18:00)
-    if (currentDayOfWeek === Number(this.settings.weeklyReviewDay) && currentTimeStr === this.settings.weeklyReviewTime) {
-      this.sendNotification('📅 Time for your Weekly Review!', {
-        body: 'Check off your sprint achievements and plan next week in Kizen.'
+    // 1. Daily Morning Prompt (e.g. 09:00)
+    if (this.settings.dailyReminderEnabled && currentTimeStr === this.settings.dailyReminderTime) {
+      this.sendNotification('☀️ Buenos Días: Pilares Kizen', {
+        body: 'Revisa tus 7 pilares diarios y misiones prioritarias de hoy.'
       });
       localStorage.setItem('kizen_last_notification_trigger', triggerKey);
+      return;
     }
 
-    // 2. Monthly Review Reminder (e.g. 1st of month 10:00)
-    if (currentDate === Number(this.settings.monthlyReviewDay) && currentTimeStr === this.settings.monthlyReviewTime) {
-      this.sendNotification('🗓️ Monthly Alignment & Goal Review', {
-        body: 'Review your monthly OKRs and set this month\'s vision!'
+    // 2. Weekly Review Reminder (e.g. Sunday 18:00)
+    if (currentDayOfWeek === Number(this.settings.weeklyReviewDay) && currentTimeStr === this.settings.weeklyReviewTime) {
+      this.sendNotification('📅 Momento de tu Revisión Semanal', {
+        body: 'Revisa los logros del sprint y planifica tus objetivos para la próxima semana.'
       });
       localStorage.setItem('kizen_last_notification_trigger', triggerKey);
+      return;
+    }
+
+    // 3. Monthly Review Reminder (e.g. 1st of month 10:00)
+    if (currentDate === Number(this.settings.monthlyReviewDay) && currentTimeStr === this.settings.monthlyReviewTime) {
+      this.sendNotification('🗓️ Alineación y Visión Mensual', {
+        body: 'Revisa tus OKRs mensuales y define las metas clave de este mes.'
+      });
+      localStorage.setItem('kizen_last_notification_trigger', triggerKey);
+      return;
     }
   }
 }

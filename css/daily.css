@@ -409,3 +409,34 @@
   color: var(--text-muted);
   width: 18px;
 }
+
+/* Interactive Calendar Day Cells */
+.cal-day-cell {
+  user-select: none;
+  transition: all 0.15s ease;
+}
+
+.cal-day-cell:hover {
+  filter: brightness(1.2);
+  transform: translateY(-1px);
+}
+
+.cal-day-cell:active {
+  transform: scale(0.95);
+}
+
+/* Mood Selector */
+.mood-selector {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.btn-mood {
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.btn-mood:hover {
+  transform: scale(1.15);
+}
+

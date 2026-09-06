@@ -1,24 +1,25 @@
 /**
  * STATS, GAMIFICATION ANALYTICS & REVIEW NOTIFICATIONS (js/views/statsView.js)
- * Visualizes 365-day heatmap, completed tasks & projects history, pillar consistency, notifications, and backups.
+ * Visualizes 365-day heatmap, real pillar consistency, grouped completed activities history,
+ * streak freeze refills, notifications scheduler, and backups.
  */
 
 import { store } from '../store.js';
 import { dbManager } from '../db.js';
-import { calculateLevelData } from '../gamification.js';
+import { calculateLevelData, MAX_FREEZE_SHIELDS, FREEZE_SHIELD_COST_XP } from '../gamification.js';
 import { notificationEngine } from '../notifications.js';
 
-export function renderStatsView(container) {
-  const { profile, tasks, projects, dailyLog } = store;
+let activitySearchQuery = '';
+
+export async function renderStatsView(container) {
+  const { profile, tasks, projects } = store;
   if (!profile) return;
 
   const levelData = calculateLevelData(profile.totalXp);
   const completedTasks = tasks.filter(t => t.isCompleted);
-  const completedProjects = projects.filter(p => {
-    const total = p.activities?.length || 0;
-    const done = p.activities?.filter(a => a.isCompleted).length || 0;
-    return total > 0 && done === total;
-  });
+  
+  // Real Pillar Consistency Stats
+  const pillarStats = await store.getPillarConsistencyStats();
 
   const savedRemoteUrl = localStorage.getItem('kizen_couchdb_url') || '';
   const notifSettings = notificationEngine.settings;
@@ -31,68 +32,94 @@ export function renderStatsView(container) {
     });
   });
 
+  // Group ALL completed activities (manual tasks + project activities) by normalized title
+  const allCompletedItems = [
+    ...completedTasks.map(t => ({
+      title: t.title,
+      xpAwarded: t.xpAwarded || 25,
+      tags: t.tags || ['#tarea'],
+      source: 'Tarea'
+    })),
+    ...projects.flatMap(p => (p.activities || []).filter(a => a.isCompleted).map(a => ({
+      title: a.title,
+      xpAwarded: 30,
+      tags: [p.category || 'Proyecto'],
+      source: `Proyecto: ${p.name}`
+    })))
+  ];
+
+  const groupedActivitiesMap = {};
+  allCompletedItems.forEach((item) => {
+    const key = item.title.trim().toLowerCase();
+    if (!groupedActivitiesMap[key]) {
+      groupedActivitiesMap[key] = {
+        title: item.title.trim(),
+        count: 0,
+        totalXp: 0,
+        tags: new Set(),
+        sources: new Set()
+      };
+    }
+    groupedActivitiesMap[key].count += 1;
+    groupedActivitiesMap[key].totalXp += item.xpAwarded;
+    (item.tags || []).forEach(t => groupedActivitiesMap[key].tags.add(t));
+    groupedActivitiesMap[key].sources.add(item.source);
+  });
+
+  let groupedList = Object.values(groupedActivitiesMap).sort((a, b) => b.count - a.count);
+
+  if (activitySearchQuery.trim()) {
+    const q = activitySearchQuery.toLowerCase().trim();
+    groupedList = groupedList.filter(g => g.title.toLowerCase().includes(q));
+  }
+
   container.innerHTML = `
     <div class="section-header">
       <div>
-        <h1>📊 Stats & Mastery</h1>
-        <div class="section-subtitle">Gamification analytics, history, reminders & backups</div>
+        <h1>📊 Estadísticas & Maestría</h1>
+        <div class="section-subtitle">Analíticas reales de consistencia, historial de tareas, racha y recordatorios</div>
       </div>
     </div>
 
     <!-- Summary Tiles Grid -->
     <div class="stats-summary-grid">
       <div class="stat-tile">
-        <span class="stat-tile-label">Lifetime Points</span>
+        <span class="stat-tile-label">Puntos Totales</span>
         <span class="stat-tile-value" style="color: var(--color-xp);">${profile.totalXp} XP</span>
-        <span class="stat-tile-sub">Level ${levelData.level} • ${levelData.rankTitle}</span>
+        <span class="stat-tile-sub">Nivel ${levelData.level} • ${levelData.rankTitle}</span>
       </div>
 
       <div class="stat-tile">
-        <span class="stat-tile-label">Current Streak</span>
+        <span class="stat-tile-label">Racha Actual</span>
         <span class="stat-tile-value" style="color: var(--color-streak);">🔥 ${profile.currentStreak || 0}</span>
-        <span class="stat-tile-sub">Best: ${profile.longestStreak || 0} days</span>
+        <span class="stat-tile-sub">Récord: ${profile.longestStreak || 0} días</span>
       </div>
 
       <div class="stat-tile">
-        <span class="stat-tile-label">Completed Tasks</span>
-        <span class="stat-tile-value" style="color: var(--color-success);">${completedTasks.length}</span>
-        <span class="stat-tile-sub">Total logged: ${tasks.length}</span>
+        <span class="stat-tile-label">Acciones Completadas</span>
+        <span class="stat-tile-value" style="color: var(--color-success);">${allCompletedItems.length}</span>
+        <span class="stat-tile-sub">${groupedList.length} actividades únicas</span>
       </div>
 
-      <div class="stat-tile">
-        <span class="stat-tile-label">Freeze Shields</span>
-        <span class="stat-tile-value" style="color: var(--color-primary);">🛡️ ${profile.freezeTokens ?? 1}</span>
-        <span class="stat-tile-sub">1 added per 7d streak</span>
-      </div>
-    </div>
-
-    <!-- App Installation Banner (For Chrome / Mobile) -->
-    <div class="card" style="background: linear-gradient(135deg, #0e1e38 0%, #12284c 100%); border-color: rgba(56, 189, 248, 0.3);">
-      <div style="display: flex; justify-content: space-between; align-items: center;">
+      <div class="stat-tile" style="display: flex; flex-direction: column; justify-content: space-between;">
         <div>
-          <div style="font-weight: 700; font-size: 0.95rem; color: var(--color-primary);">
-            📲 Install Kizen as an App
-          </div>
-          <p style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 2px;">
-            Run offline in full screen without browser toolbars.
-          </p>
+          <span class="stat-tile-label">Escudos de Racha</span>
+          <span class="stat-tile-value" style="color: var(--color-primary);">🛡️ ${profile.freezeTokens ?? 1} / ${MAX_FREEZE_SHIELDS}</span>
+          <span class="stat-tile-sub">+1 cada 7d de racha</span>
         </div>
-        <button class="btn btn-primary btn-sm" id="btn-trigger-pwa-install">
-          Install App
+        <button class="btn btn-sm btn-secondary" id="btn-refill-freeze-shield" style="margin-top: 8px; font-size: 0.72rem; padding: 4px 8px;">
+          + Recargar (${FREEZE_SHIELD_COST_XP} XP)
         </button>
-      </div>
-      <div id="pwa-install-help" style="display: none; margin-top: 10px; font-size: 0.78rem; color: var(--text-secondary); border-top: 1px solid var(--border-subtle); padding-top: 8px;">
-        💡 <strong>In Chrome on Mobile/PC</strong>: Click the 3 dots <code>⋮</code> in the top right $\rightarrow$ select <strong>"Install Kizen"</strong> or <strong>"Add to Home Screen"</strong>. (If testing over LAN Wi-Fi, Chrome requires localhost or HTTPS).
       </div>
     </div>
 
     <!-- 365-Day Activity Heatmap -->
     <div class="heatmap-card">
       <div class="section-title" style="margin-bottom: 8px;">
-        <span>🔥 Annual Activity Heatmap (365 Days)</span>
+        <span>🔥 Mapa de Calor Anual (365 Días)</span>
       </div>
       <p style="font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 12px;">
-        Daily points intensity across the year (5:00 AM reset cycle).
+        Intensidad de productividad diaria (ciclo con reinicio a las 5:00 AM).
       </p>
 
       <div class="heatmap-scroll-container">
@@ -102,7 +129,7 @@ export function renderStatsView(container) {
       </div>
 
       <div class="heatmap-legend">
-        <span>Less</span>
+        <span>Menos</span>
         <div class="legend-cells">
           <div class="heatmap-cell"></div>
           <div class="heatmap-cell l1"></div>
@@ -111,49 +138,61 @@ export function renderStatsView(container) {
           <div class="heatmap-cell l4"></div>
           <div class="heatmap-cell l5"></div>
         </div>
-        <span>More</span>
+        <span>Más</span>
       </div>
     </div>
 
-    <!-- 7 Pillar Consistency Bars -->
+    <!-- 7 Pillar Consistency Bars (REAL DATA!) -->
     <div class="card">
-      <div class="section-title" style="margin-bottom: 12px;">
-        <span>🏛️ Pillar Consistency</span>
+      <div class="section-title" style="margin-bottom: 8px;">
+        <span>🏛️ Consistencia Real de Pilares</span>
       </div>
+      <p style="font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 12px;">
+        Porcentaje histórico exacto basado en todos los registros diarios guardados en tu base de datos.
+      </p>
+      
       <div class="pillar-consistency-list">
-        ${profile.pillars.map((pillar) => {
-          const isDoneToday = dailyLog?.pillarsCompleted?.includes(pillar.id);
-          const simulatedConsistency = isDoneToday ? 88 : 65;
-          return `
-            <div class="pillar-stat-row">
-              <div class="pillar-stat-header">
-                <span>${pillar.icon} ${pillar.name}</span>
-                <span style="font-weight: 700; color: var(--text-secondary);">${simulatedConsistency}%</span>
-              </div>
-              <div class="pillar-stat-bar-track">
-                <div class="pillar-stat-bar-fill" style="width: ${simulatedConsistency}%;"></div>
-              </div>
+        ${pillarStats.map((pillar) => `
+          <div class="pillar-stat-row">
+            <div class="pillar-stat-header">
+              <span>${pillar.icon} ${pillar.name}</span>
+              <span style="font-weight: 700; color: var(--text-secondary);">
+                ${pillar.daysCompleted}/${pillar.totalDaysRecorded} días (${pillar.percentage}%)
+              </span>
             </div>
-          `;
-        }).join('')}
+            <div class="pillar-stat-bar-track">
+              <div class="pillar-stat-bar-fill" style="width: ${pillar.percentage}%;"></div>
+            </div>
+          </div>
+        `).join('')}
       </div>
     </div>
 
-    <!-- Completed Tasks & Projects History Segment -->
+    <!-- Grouped Completed Activities History -->
     <div class="card">
-      <div class="section-title" style="margin-bottom: 12px;">
-        <span>✅ Completed Tasks & Projects Breakdown</span>
+      <div class="section-title" style="margin-bottom: 6px;">
+        <span>✅ Historial de Actividades Completadas</span>
+      </div>
+      <p style="font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 12px;">
+        Todas las actividades y tareas realizadas agrupadas por nombre con contador de repeticiones y XP total.
+      </p>
+
+      <!-- Search bar -->
+      <div style="margin-bottom: 12px;">
+        <input type="text" class="input-text" id="stats-search-activities" 
+          placeholder="🔍 Filtrar actividad por nombre..." value="${escapeHtml(activitySearchQuery)}" style="font-size: 0.85rem;">
       </div>
       
+      <!-- XP by Tag -->
       <div style="margin-bottom: 14px;">
         <div style="font-size: 0.8rem; font-weight: 700; color: var(--text-secondary); margin-bottom: 6px;">
-          XP Earned by Tag / Category:
+          Puntos por Categoría / Tag:
         </div>
-        <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+        <div style="display: flex; flex-wrap: wrap; gap: 6px;">
           ${Object.keys(tagXpMap).length === 0 ? `
-            <span style="font-size: 0.8rem; color: var(--text-muted);">No completed tagged tasks yet.</span>
+            <span style="font-size: 0.8rem; color: var(--text-muted);">Sin tareas etiquetadas completadas aún.</span>
           ` : Object.entries(tagXpMap).map(([tag, xp]) => `
-            <div class="tag-badge" style="padding: 4px 10px; font-size: 0.78rem;">
+            <div class="tag-badge" style="padding: 4px 10px; font-size: 0.76rem;">
               <span>${escapeHtml(tag)}</span>
               <strong style="color: var(--color-xp);">+${xp} XP</strong>
             </div>
@@ -161,129 +200,118 @@ export function renderStatsView(container) {
         </div>
       </div>
 
-      <div style="margin-bottom: 14px;">
-        <div style="font-size: 0.8rem; font-weight: 700; color: var(--text-secondary); margin-bottom: 6px;">
-          Project Roadmaps (${projects.length} Total • ${completedProjects.length} Completed):
-        </div>
-        <div class="task-list">
-          ${projects.map((p) => {
-            const totalActs = p.activities?.length || 0;
-            const doneActs = p.activities?.filter(a => a.isCompleted).length || 0;
-            const isAllDone = totalActs > 0 && doneActs === totalActs;
-            return `
-              <div class="task-item ${isAllDone ? 'completed' : ''}">
-                <div class="task-body">
-                  <div class="task-title">${escapeHtml(p.name)}</div>
-                  <div class="task-meta-row">
-                    <span class="tag-badge">${escapeHtml(p.category)}</span>
-                    <span class="tag-badge">Activities: ${doneActs}/${totalActs}</span>
-                    <span class="tag-badge" style="color: var(--color-xp);">⚡ ${doneActs * 30} XP Earned</span>
-                  </div>
+      <!-- Grouped List -->
+      <div class="task-list" style="max-height: 280px; overflow-y: auto;">
+        ${groupedList.length === 0 ? `
+          <div style="font-size: 0.82rem; color: var(--text-muted); text-align: center; padding: 16px;">
+            No hay actividades completadas registradas con ese criterio.
+          </div>
+        ` : groupedList.map((item) => `
+          <div class="task-item completed" style="padding: 8px 12px; margin-bottom: 6px;">
+            <div class="task-body">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div class="task-title" style="font-size: 0.88rem; font-weight: 600;">
+                  ${escapeHtml(item.title)}
                 </div>
+                <span class="tag-badge" style="background: rgba(56, 189, 248, 0.15); color: var(--color-primary); font-weight: 700; font-size: 0.74rem;">
+                  x${item.count} ${item.count === 1 ? 'vez' : 'veces'}
+                </span>
               </div>
-            `;
-          }).join('')}
-        </div>
-      </div>
-
-      <div>
-        <div style="font-size: 0.8rem; font-weight: 700; color: var(--text-secondary); margin-bottom: 6px;">
-          Recently Completed Actions (${completedTasks.length}):
-        </div>
-        <div class="task-list" style="max-height: 220px; overflow-y: auto;">
-          ${completedTasks.length === 0 ? `
-            <span style="font-size: 0.8rem; color: var(--text-muted);">No tasks checked off yet today.</span>
-          ` : completedTasks.slice(0, 15).map((t) => `
-            <div class="task-item completed" style="padding: 8px 12px;">
-              <div class="task-body">
-                <div class="task-title" style="font-size: 0.85rem;">${escapeHtml(t.title)}</div>
-                <div class="task-meta-row">
-                  <span class="difficulty-pill ${t.difficulty}">+${t.xpAwarded} XP</span>
-                  ${(t.tags || []).map(tag => `<span class="tag-badge">${escapeHtml(tag)}</span>`).join('')}
-                </div>
+              <div class="task-meta-row" style="margin-top: 4px;">
+                <span class="difficulty-pill medium">+${item.totalXp} XP Acumulados</span>
+                ${Array.from(item.tags).map(tag => `<span class="tag-badge">${escapeHtml(tag)}</span>`).join('')}
+                ${Array.from(item.sources).map(src => `<span class="tag-badge" style="opacity: 0.8;">📍 ${escapeHtml(src)}</span>`).join('')}
               </div>
             </div>
-          `).join('')}
-        </div>
+          </div>
+        `).join('')}
       </div>
     </div>
 
     <!-- Review Reminders & Notifications -->
     <div class="card">
       <div class="section-title" style="margin-bottom: 8px;">
-        <span>🔔 Review Reminders & Notifications</span>
+        <span>🔔 Configuración de Notificaciones & Recordatorios</span>
       </div>
       <p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 12px;">
-        Schedule automatic prompts for Weekly and Monthly reviews.
+        Recibe recordatorios diarios para tus pilares y avisos para las revisiones semanales y mensuales.
       </p>
 
-      <div style="display: flex; gap: 8px; margin-bottom: 14px;">
+      <div style="display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap;">
         <button class="btn ${notifSettings.enabled ? 'btn-secondary' : 'btn-primary'} btn-sm" id="btn-toggle-notifications">
-          ${notifSettings.enabled ? '🔔 Notifications Active' : '🔕 Enable Notifications'}
+          ${notifSettings.enabled ? '🔔 Notificaciones Activas (Click para apagar)' : '🔕 Activar Notificaciones'}
         </button>
         <button class="btn btn-secondary btn-sm" id="btn-test-notification">
-          Send Test
+          Enviar Prueba
         </button>
       </div>
 
       <div class="input-group">
-        <label class="input-label">Weekly Review Schedule:</label>
+        <label class="input-label">☀️ Recordatorio Diario Matutino:</label>
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <input type="time" class="input-text" id="input-daily-reminder-time" value="${notifSettings.dailyReminderTime || '09:00'}" style="flex: 1;">
+          <span style="font-size: 0.75rem; color: var(--text-muted);">Hora de inicio del día</span>
+        </div>
+      </div>
+
+      <div class="input-group">
+        <label class="input-label">📅 Revisión Semanal (Sprint Review):</label>
         <div style="display: flex; gap: 8px;">
           <select class="select" id="select-weekly-day" style="flex: 1;">
-            <option value="0" ${notifSettings.weeklyReviewDay == 0 ? 'selected' : ''}>Sunday</option>
-            <option value="1" ${notifSettings.weeklyReviewDay == 1 ? 'selected' : ''}>Monday</option>
-            <option value="5" ${notifSettings.weeklyReviewDay == 5 ? 'selected' : ''}>Friday</option>
-            <option value="6" ${notifSettings.weeklyReviewDay == 6 ? 'selected' : ''}>Saturday</option>
+            <option value="0" ${notifSettings.weeklyReviewDay == 0 ? 'selected' : ''}>Domingo</option>
+            <option value="1" ${notifSettings.weeklyReviewDay == 1 ? 'selected' : ''}>Lunes</option>
+            <option value="5" ${notifSettings.weeklyReviewDay == 5 ? 'selected' : ''}>Viernes</option>
+            <option value="6" ${notifSettings.weeklyReviewDay == 6 ? 'selected' : ''}>Sábado</option>
           </select>
           <input type="time" class="input-text" id="input-weekly-time" value="${notifSettings.weeklyReviewTime || '18:00'}" style="flex: 1;">
         </div>
       </div>
 
       <div class="input-group">
-        <label class="input-label">Monthly Review Schedule:</label>
+        <label class="input-label">🗓️ Revisión Mensual (OKRs & Visión):</label>
         <div style="display: flex; gap: 8px;">
           <select class="select" id="select-monthly-day" style="flex: 1;">
-            <option value="1" ${notifSettings.monthlyReviewDay == 1 ? 'selected' : ''}>1st of Month</option>
-            <option value="28" ${notifSettings.monthlyReviewDay == 28 ? 'selected' : ''}>28th of Month</option>
+            <option value="1" ${notifSettings.monthlyReviewDay == 1 ? 'selected' : ''}>Día 1 del Mes</option>
+            <option value="28" ${notifSettings.monthlyReviewDay == 28 ? 'selected' : ''}>Día 28 del Mes</option>
           </select>
           <input type="time" class="input-text" id="input-monthly-time" value="${notifSettings.monthlyReviewTime || '10:00'}" style="flex: 1;">
         </div>
       </div>
 
-      <button class="btn btn-secondary btn-sm" id="btn-save-notif-schedule">
-        Save Schedule
+      <button class="btn btn-primary btn-sm" id="btn-save-notif-schedule">
+        💾 Guardar Horarios de Recordatorio
       </button>
     </div>
 
     <!-- CouchDB PC Server Sync Settings -->
     <div class="sync-settings-card">
       <div class="section-title" style="margin-bottom: 8px;">
-        <span>💻 CouchDB PC Sync (Option 2)</span>
+        <span>💻 Sincronización con Servidor PC</span>
       </div>
       <p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 12px;">
-        Connect your phone or browser to your PC CouchDB database. Syncs automatically whenever your PC server is running.
+        Conecta tu teléfono o navegador a la base de datos de tu PC vía Wi-Fi o Tailscale.
       </p>
 
       <div class="sync-status-display">
-        <span>Status:</span>
+        <span>Estado:</span>
         <strong id="couchdb-status-text" style="color: ${dbManager.syncStatus === 'online' ? 'var(--color-success)' : 'var(--text-muted)'};">
           ${dbManager.syncStatus.toUpperCase()}
         </strong>
       </div>
 
       <div class="input-group">
-        <label class="input-label">CouchDB Server URL:</label>
+        <label class="input-label">URL del Servidor CouchDB:</label>
         <input type="text" class="input-text" id="couchdb-url-input" 
-          placeholder="http://192.168.1.50:5984/kizen_db or Tailscale IP" 
+          placeholder="http://192.168.1.50:5984/kizen_db o IP de Tailscale" 
           value="${escapeHtml(savedRemoteUrl)}">
       </div>
 
       <div style="display: flex; gap: 8px;">
         <button class="btn btn-primary btn-sm" id="btn-save-couchdb-sync">
-          ⚡ Connect & Sync
+          ⚡ Conectar & Sincronizar
         </button>
         <button class="btn btn-secondary btn-sm" id="btn-disconnect-couchdb-sync">
-          Disconnect
+          Desconectar
         </button>
       </div>
     </div>
@@ -291,17 +319,17 @@ export function renderStatsView(container) {
     <!-- Data Backup & Portability -->
     <div class="card">
       <div class="section-title" style="margin-bottom: 8px;">
-        <span>💾 Data Backup & Portability</span>
+        <span>💾 Copia de Seguridad & Portabilidad</span>
       </div>
       <p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 12px;">
-        Export your complete database to an offline JSON file anytime or restore from a backup.
+        Exporta tu base de datos completa a un archivo JSON offline o restaura tus datos.
       </p>
       <div style="display: flex; gap: 8px;">
         <button class="btn btn-secondary btn-sm" id="btn-export-backup">
-          📥 Export JSON Backup
+          📥 Exportar Copia JSON
         </button>
         <label class="btn btn-secondary btn-sm" style="cursor: pointer;">
-          📤 Import Backup
+          📤 Importar Copia
           <input type="file" id="input-import-backup" accept=".json" style="display: none;">
         </label>
       </div>
@@ -335,24 +363,26 @@ function renderHeatmapCells(totalXp) {
 }
 
 function attachStatsEventListeners(container) {
-  // PWA Install Button
-  const btnInstall = container.querySelector('#btn-trigger-pwa-install');
-  if (btnInstall) {
-    btnInstall.addEventListener('click', () => {
-      if (window.deferredPwaPrompt) {
-        window.deferredPwaPrompt.prompt();
-        window.deferredPwaPrompt.userChoice.then((choice) => {
-          if (choice.outcome === 'accepted') {
-            alert('Installing Kizen!');
-          }
-          window.deferredPwaPrompt = null;
-        });
+  // Refill Streak Freeze Shield
+  const btnRefill = container.querySelector('#btn-refill-freeze-shield');
+  if (btnRefill) {
+    btnRefill.addEventListener('click', async () => {
+      const res = await store.refillFreezeShield(FREEZE_SHIELD_COST_XP);
+      if (res.success) {
+        alert(`🛡️ ¡Escudo recargado exitosamente! Tienes ${res.freezeTokens}/${MAX_FREEZE_SHIELDS} escudos.`);
+        renderStatsView(container);
       } else {
-        const help = container.querySelector('#pwa-install-help');
-        if (help) {
-          help.style.display = help.style.display === 'none' ? 'block' : 'none';
-        }
+        alert(res.error);
       }
+    });
+  }
+
+  // Activity search input
+  const searchInput = container.querySelector('#stats-search-activities');
+  if (searchInput) {
+    searchInput.addEventListener('input', (e) => {
+      activitySearchQuery = e.target.value;
+      renderStatsView(container);
     });
   }
 
@@ -360,11 +390,11 @@ function attachStatsEventListeners(container) {
   const btnToggleNotif = container.querySelector('#btn-toggle-notifications');
   if (btnToggleNotif) {
     btnToggleNotif.addEventListener('click', async () => {
-      const granted = await notificationEngine.requestPermission();
-      if (granted) {
-        alert('Notifications enabled! You will be reminded for scheduled reviews.');
+      const active = await notificationEngine.toggleEnabled();
+      if (active) {
+        alert('🔔 ¡Notificaciones activadas!');
       } else {
-        alert('Notification permission was not granted.');
+        alert('🔕 Notificaciones desactivadas.');
       }
       renderStatsView(container);
     });
@@ -374,8 +404,8 @@ function attachStatsEventListeners(container) {
   const btnTestNotif = container.querySelector('#btn-test-notification');
   if (btnTestNotif) {
     btnTestNotif.addEventListener('click', () => {
-      notificationEngine.sendNotification('⚡ Kizen Test Reminder', {
-        body: 'Notifications are working! Your reviews will trigger on schedule.'
+      notificationEngine.sendNotification('⚡ Prueba de Notificación Kizen', {
+        body: '¡Las notificaciones están configuradas y funcionando correctamente!'
       });
     });
   }
@@ -384,19 +414,22 @@ function attachStatsEventListeners(container) {
   const btnSaveNotif = container.querySelector('#btn-save-notif-schedule');
   if (btnSaveNotif) {
     btnSaveNotif.addEventListener('click', () => {
+      const dailyTime = container.querySelector('#input-daily-reminder-time').value;
       const weeklyDay = container.querySelector('#select-weekly-day').value;
       const weeklyTime = container.querySelector('#input-weekly-time').value;
       const monthlyDay = container.querySelector('#select-monthly-day').value;
       const monthlyTime = container.querySelector('#input-monthly-time').value;
 
       notificationEngine.saveSettings({
+        dailyReminderEnabled: true,
+        dailyReminderTime: dailyTime,
         weeklyReviewDay: weeklyDay,
         weeklyReviewTime: weeklyTime,
         monthlyReviewDay: monthlyDay,
         monthlyReviewTime: monthlyTime
       });
 
-      alert('Review schedule saved!');
+      alert('✅ Horarios de notificación guardados correctamente.');
     });
   }
 
@@ -406,15 +439,15 @@ function attachStatsEventListeners(container) {
     btnSaveSync.addEventListener('click', () => {
       const url = container.querySelector('#couchdb-url-input').value.trim();
       if (!url) {
-        alert('Please enter a valid CouchDB URL.');
+        alert('Por favor ingresa una URL válida de CouchDB.');
         return;
       }
       const res = dbManager.connectRemote(url);
       if (res.success) {
-        alert('CouchDB 2-way sync initiated!');
+        alert('¡Sincronización CouchDB iniciada!');
         renderStatsView(container);
       } else {
-        alert('Error connecting: ' + res.error);
+        alert('Error al conectar: ' + res.error);
       }
     });
   }
@@ -424,7 +457,7 @@ function attachStatsEventListeners(container) {
   if (btnDisconnect) {
     btnDisconnect.addEventListener('click', () => {
       dbManager.disconnectRemote();
-      alert('CouchDB remote sync disconnected.');
+      alert('Sincronización remota desconectada.');
       renderStatsView(container);
     });
   }
@@ -455,11 +488,11 @@ function attachStatsEventListeners(container) {
         const jsonStr = evt.target.result;
         const res = await dbManager.importData(jsonStr);
         if (res.success) {
-          alert(`Successfully imported ${res.count} documents! Reloading data...`);
+          alert(`¡${res.count} documentos importados exitosamente! Recargando datos...`);
           await store.loadInitialData();
           renderStatsView(container);
         } else {
-          alert('Import failed: ' + res.error);
+          alert('Error en importación: ' + res.error);
         }
       };
       reader.readAsText(file);

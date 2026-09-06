@@ -1,45 +1,55 @@
 /**
  * DAILY COMMAND CENTER VIEW (js/views/dailyView.js)
- * Features 7 Daily Pillars, Active Project integration, Level Hero, Action items with Difficulty XP, and Journaling.
+ * Features Hero Level, Macro Objectives Hub (Weekly/Monthly), Interactive Calendar with day planner,
+ * Actions for selected date, Rollover tasks, 7 Daily Pillars, and Multi-Project activities dashboard.
  */
 
 import { store } from '../store.js';
 import {
   calculateLevelData,
-  formatDisplayDate,
-  DIFFICULTY_XP
+  formatDisplayDate
 } from '../gamification.js';
 
+// Internal state for interactive calendar
+let calendarSelectedDate = null;
+let calendarCurrentMonth = new Date().getMonth();
+let calendarCurrentYear = new Date().getFullYear();
+
 export function renderDailyView(container) {
-  const { profile, dailyLog, tasks, projects, customTags, currentLogicalDate } = store;
+  const { profile, dailyLog, tasks, projects, weeklyGoals, monthlyGoals, customTags, currentLogicalDate } = store;
   if (!profile || !dailyLog) {
-    container.innerHTML = '<div class="card">Loading Daily Command Center...</div>';
+    container.innerHTML = '<div class="card">Cargando Centro de Mando Diario...</div>';
     return;
   }
+
+  const selectedDate = calendarSelectedDate || currentLogicalDate;
+  const isSelectedDateToday = selectedDate === currentLogicalDate;
 
   const levelData = calculateLevelData(profile.totalXp);
   const completedPillarsCount = dailyLog.pillarsCompleted?.length || 0;
   const totalPillarsCount = profile.pillars.length;
   const isAllPillarsCompleted = completedPillarsCount === totalPillarsCount;
 
-  const activeProj = store.getActiveProject();
-  const activeProjActivities = activeProj?.activities || [];
-
-  // Filter tasks for today
-  const todayTasks = tasks.filter(
-    (t) => (t.scheduledDate === currentLogicalDate || !t.scheduledDate) && !t.isOptional
+  // Filter tasks for the selected date
+  const dateTasks = tasks.filter(
+    (t) => (t.scheduledDate === selectedDate || (!t.scheduledDate && isSelectedDateToday)) && !t.isOptional
   );
   const optionalTasks = tasks.filter(
-    (t) => (t.scheduledDate === currentLogicalDate || !t.scheduledDate) && t.isOptional
+    (t) => (t.scheduledDate === selectedDate || (!t.scheduledDate && isSelectedDateToday)) && t.isOptional
   );
-  const rolloverTasks = tasks.filter(
+  const rolloverTasks = isSelectedDateToday ? tasks.filter(
     (t) => t.scheduledDate && t.scheduledDate < currentLogicalDate && !t.isCompleted
-  );
+  ) : [];
 
-  const nextSuggested = store.getSuggestedNextTask();
+  // Active weekly & monthly objectives
+  const activeWeekly = weeklyGoals.filter(g => !g.isCompleted);
+  const activeMonthly = monthlyGoals.filter(g => !g.isCompleted);
+
+  // Active projects (multiple projects view)
+  const activeProjects = store.getActiveProjects();
 
   container.innerHTML = `
-    <!-- Top Level Hero Card -->
+    <!-- 1. Top Level Hero Card -->
     <div class="level-hero-card">
       <div class="level-hero-top">
         <div class="level-title-group">
@@ -47,7 +57,7 @@ export function renderDailyView(container) {
           <span class="level-rank-name">${levelData.rankTitle}</span>
         </div>
         <div class="level-streak-badge">
-          🔥 ${profile.currentStreak || 0} Day Streak
+          🔥 ${profile.currentStreak || 0} Días de Racha
         </div>
       </div>
       <div class="xp-progress-wrapper">
@@ -61,37 +71,168 @@ export function renderDailyView(container) {
       </div>
     </div>
 
-    <!-- Active Focus & "Pull Next Task" Banner -->
-    <div class="focus-objective-card">
-      <div class="focus-objective-header">
-        <span class="focus-tag">⚡ Current Focus</span>
-        <button class="btn btn-sm btn-secondary" id="btn-pull-next-task">
-          🎯 Pull Next Task
+    <!-- 2. Macro Objectives Hub (Weekly & Monthly) -->
+    <div class="card" style="background: linear-gradient(135deg, #0e1b33 0%, #152747 100%); border-color: rgba(56, 189, 248, 0.35); margin-bottom: 16px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+        <span style="font-size: 0.85rem; font-weight: 700; color: var(--color-primary); text-transform: uppercase; letter-spacing: 0.05em;">
+          🎯 Misiones Macro (Semanales & Mensuales)
+        </span>
+        <span style="font-size: 0.75rem; color: var(--text-muted);">Enfoque Estratégico</span>
+      </div>
+
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px;">
+        <!-- Monthly North Stars -->
+        <div style="background: rgba(0,0,0,0.25); border-radius: var(--radius-sm); padding: 10px; border-left: 3px solid #818cf8;">
+          <div style="font-size: 0.75rem; font-weight: 700; color: #a5b4fc; margin-bottom: 4px;">
+            🗓️ Objetivo Mensual Activo:
+          </div>
+          ${activeMonthly.length === 0 ? `
+            <div style="font-size: 0.78rem; color: var(--text-muted);">Sin objetivos mensuales. Establece uno en Monthly!</div>
+          ` : activeMonthly.slice(0, 2).map(m => `
+            <div style="font-size: 0.84rem; font-weight: 600; color: var(--text-primary); margin-bottom: 2px;">
+              • ${escapeHtml(m.title)}
+            </div>
+          `).join('')}
+        </div>
+
+        <!-- Weekly Sprint Goals -->
+        <div style="background: rgba(0,0,0,0.25); border-radius: var(--radius-sm); padding: 10px; border-left: 3px solid #38bdf8;">
+          <div style="font-size: 0.75rem; font-weight: 700; color: var(--color-primary); margin-bottom: 4px;">
+            📅 Sprints Semanales (${activeWeekly.length}):
+          </div>
+          ${activeWeekly.length === 0 ? `
+            <div style="font-size: 0.78rem; color: var(--text-muted);">Todos los sprints completados o sin fijar.</div>
+          ` : activeWeekly.slice(0, 2).map(w => `
+            <div style="font-size: 0.84rem; font-weight: 600; color: var(--text-primary); margin-bottom: 2px;">
+              • ${escapeHtml(w.title)}
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    </div>
+
+    <!-- 3. Interactive Calendar & Day Planner -->
+    <div class="card" style="background: var(--bg-surface); border-color: rgba(255, 255, 255, 0.08); margin-bottom: 16px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <button class="btn btn-sm btn-ghost btn-cal-prev" title="Mes anterior">◀</button>
+          <span style="font-weight: 700; font-size: 0.95rem; color: var(--text-primary);" id="cal-month-header">
+            ${getMonthName(calendarCurrentMonth)} ${calendarCurrentYear}
+          </span>
+          <button class="btn btn-sm btn-ghost btn-cal-next" title="Mes siguiente">▶</button>
+        </div>
+        <button class="btn btn-sm btn-secondary btn-cal-today">Hoy</button>
+      </div>
+
+      <!-- Calendar Grid -->
+      <div class="calendar-grid">
+        <div style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; text-align: center; font-size: 0.72rem; color: var(--text-muted); font-weight: 700; margin-bottom: 6px;">
+          <span>Lun</span><span>Mar</span><span>Mié</span><span>Jue</span><span>Vie</span><span>Sáb</span><span>Dom</span>
+        </div>
+        <div class="calendar-days-grid" id="calendar-days-container" style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px;">
+          ${renderCalendarDays(calendarCurrentYear, calendarCurrentMonth, selectedDate, currentLogicalDate, tasks)}
+        </div>
+      </div>
+
+      <!-- Selected Date Info & Quick Add for this Day -->
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border-subtle); flex-wrap: wrap; gap: 8px;">
+        <div style="font-size: 0.84rem; color: var(--text-secondary);">
+          Viendo: <strong style="color: var(--color-primary);">${formatDisplayDate(selectedDate)}</strong>
+          ${isSelectedDateToday ? ' (Hoy)' : ''}
+        </div>
+        <button class="btn btn-sm btn-primary" id="btn-add-task-for-selected-date">
+          + Agregar Tarea para ${selectedDate.slice(5)}
         </button>
       </div>
-      <div class="focus-objective-text" id="focus-task-display">
-        ${nextSuggested ? nextSuggested.title : 'All primary targets clear! Add a task or pull from projects.'}
-      </div>
     </div>
 
-    <!-- 7 Daily Pillars Section -->
-    <div class="section-header">
-      <div class="section-title">
-        <span>🏛️ The 7 Daily Pillars</span>
-        <span class="section-subtitle">(${completedPillarsCount}/${totalPillarsCount})</span>
+    <!-- 4. Action List for Selected Date & Rollovers -->
+    <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; margin-bottom: 10px;">
+      <div class="tag-filter-bar" id="tag-filter-bar" style="margin-bottom: 0; padding-bottom: 0; flex: 1;">
+        <button class="filter-chip active" data-tag="all">Todos</button>
+        ${customTags.map((tag) => `
+          <button class="filter-chip" data-tag="${tag.id}" style="--tag-color: ${tag.color};">
+            ${tag.label}
+          </button>
+        `).join('')}
+        <button class="filter-chip" id="btn-manage-tags" style="border-style: dashed;">
+          + Tag
+        </button>
       </div>
-      <span class="section-subtitle">5:00 AM Reset</span>
+      <button class="btn btn-sm btn-primary" id="btn-open-add-task" style="white-space: nowrap; flex-shrink: 0;">
+        + Acción
+      </button>
     </div>
 
-    ${isAllPillarsCompleted ? `
-      <div class="pillar-combo-card">
-        <div class="combo-text">
-          ✨ 7/7 Pillars Mastered! +50 XP Combo Claimed!
+    <!-- Yesterday's Rollover Tasks (if today) -->
+    ${rolloverTasks.length > 0 ? `
+      <div class="rollover-card" style="margin-bottom: 12px;">
+        <div class="rollover-header">
+          <span>⏳ Tareas Pendientes de Ayer (${rolloverTasks.length})</span>
+        </div>
+        <div class="task-list" style="margin-top: 8px;">
+          ${rolloverTasks.map((task) => `
+            <div class="task-item" style="border-style: dashed;">
+              <div class="task-body">
+                <div class="task-title">${escapeHtml(task.title)}</div>
+                <div class="task-meta-row">
+                  <span class="difficulty-pill ${task.difficulty}">+${task.xpAwarded} XP</span>
+                </div>
+              </div>
+              <div class="task-actions">
+                <button class="btn btn-sm btn-primary btn-rollover-today" data-task-id="${task._id}">
+                  Hacer Hoy
+                </button>
+                <button class="btn btn-sm btn-ghost btn-delete-task" data-task-id="${task._id}">
+                  ✕
+                </button>
+              </div>
+            </div>
+          `).join('')}
         </div>
       </div>
     ` : ''}
 
-    <div class="pillars-grid" id="pillars-grid-container">
+    <!-- Task List Container for selected date -->
+    <div class="task-list" id="daily-task-list">
+      ${dateTasks.length === 0 ? `
+        <div class="card" style="text-align: center; color: var(--text-secondary); padding: 22px;">
+          No hay tareas programadas para ${formatDisplayDate(selectedDate)}.
+          <br><button class="btn btn-sm btn-secondary" id="btn-quick-create-task" style="margin-top: 10px;">+ Crear Tarea para este día</button>
+        </div>
+      ` : dateTasks.map((task) => renderTaskItem(task)).join('')}
+    </div>
+
+    <!-- Optional / Bonus Tasks Tray -->
+    ${optionalTasks.length > 0 ? `
+      <details class="card" style="margin-top: 12px; cursor: pointer;">
+        <summary style="font-size: 0.85rem; font-weight: 700; color: var(--text-secondary);">
+          🎁 Tareas Opcionales / Bonus de Energía (${optionalTasks.length})
+        </summary>
+        <div class="task-list" style="margin-top: 10px;">
+          ${optionalTasks.map((task) => renderTaskItem(task)).join('')}
+        </div>
+      </details>
+    ` : ''}
+
+    <!-- 5. The 7 Daily Pillars Section -->
+    <div class="section-header" style="margin-top: 24px;">
+      <div class="section-title">
+        <span>🏛️ Los 7 Pilares Diarios</span>
+        <span class="section-subtitle">(${completedPillarsCount}/${totalPillarsCount})</span>
+      </div>
+      <span class="section-subtitle">Reinicio 5:00 AM</span>
+    </div>
+
+    ${isAllPillarsCompleted ? `
+      <div class="pillar-combo-card" style="margin-bottom: 12px;">
+        <div class="combo-text">
+          ✨ ¡7/7 Pilares Dominados! ¡+50 XP Combo Reclamado!
+        </div>
+      </div>
+    ` : ''}
+
+    <div class="pillars-grid" id="pillars-grid-container" style="margin-bottom: 24px;">
       ${profile.pillars.map((pillar) => {
         const isDone = dailyLog.pillarsCompleted.includes(pillar.id);
         return `
@@ -111,146 +252,129 @@ export function renderDailyView(container) {
       }).join('')}
     </div>
 
-    <!-- Active Project Daily Activities Drawer -->
-    ${activeProj ? `
-      <div class="card" style="background: linear-gradient(135deg, #101c2e 0%, #13243a 100%); border-color: rgba(56, 189, 248, 0.3); margin-top: 10px; margin-bottom: 12px;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-          <div style="display: flex; align-items: center; gap: 6px;">
-            <span style="font-size: 0.85rem; font-weight: 700; color: var(--color-primary);">💻 Focus Project:</span>
-            <select class="select" id="daily-select-active-project" style="padding: 2px 8px; font-size: 0.8rem; width: auto; background: var(--bg-surface);">
-              ${projects.map((p) => `<option value="${p._id}" ${p._id === activeProj._id ? 'selected' : ''}>${escapeHtml(p.name)}</option>`).join('')}
-            </select>
-          </div>
-          <span style="font-size: 0.75rem; color: var(--text-secondary);">
-            ${activeProjActivities.filter(a => a.isCompleted).length}/${activeProjActivities.length} Done
-          </span>
+    <!-- 6. Multi-Project Dashboard Section (See more than 1 project at once!) -->
+    <div class="section-header">
+      <div>
+        <div class="section-title">
+          <span>📁 Proyectos en Curso (${activeProjects.length})</span>
         </div>
-
-        <div class="task-list" style="margin-bottom: 0;">
-          ${activeProjActivities.length === 0 ? `
-            <div style="font-size: 0.78rem; color: var(--text-muted);">No activities in this project. Add some in the Projects tab!</div>
-          ` : activeProjActivities.map((act) => `
-            <div class="task-item ${act.isCompleted ? 'completed' : ''}" style="padding: 8px 10px;">
-              <div class="task-checkbox ${act.isCompleted ? 'checked' : ''} btn-toggle-daily-activity" 
-                   data-project-id="${activeProj._id}" data-activity-id="${act.id}">
-                ${act.isCompleted ? '✓' : ''}
-              </div>
-              <div class="task-body">
-                <div class="task-title" style="font-size: 0.85rem;">${escapeHtml(act.title)}</div>
-              </div>
-              <span class="tag-badge" style="color: var(--color-xp); font-size: 0.7rem;">+30 XP</span>
-            </div>
-          `).join('')}
-        </div>
+        <div class="section-subtitle">Actividades e hitos inmediatos de tus proyectos</div>
       </div>
-    ` : ''}
-
-    <!-- Yesterday's Rollover Tasks (if any) -->
-    ${rolloverTasks.length > 0 ? `
-      <div class="rollover-card">
-        <div class="rollover-header">
-          <span>⏳ Yesterday's Incomplete Tasks (${rolloverTasks.length})</span>
-        </div>
-        <div class="task-list" style="margin-top: 8px;">
-          ${rolloverTasks.map((task) => `
-            <div class="task-item" style="border-style: dashed;">
-              <div class="task-body">
-                <div class="task-title">${escapeHtml(task.title)}</div>
-                <div class="task-meta-row">
-                  <span class="difficulty-pill ${task.difficulty}">+${task.xpAwarded} XP</span>
-                </div>
-              </div>
-              <div class="task-actions">
-                <button class="btn btn-sm btn-primary btn-rollover-today" data-task-id="${task._id}">
-                  Do Today
-                </button>
-                <button class="btn btn-sm btn-ghost btn-delete-task" data-task-id="${task._id}">
-                  ✕
-                </button>
-              </div>
-            </div>
-          `).join('')}
-        </div>
-      </div>
-    ` : ''}
-
-    <!-- Seamless Task Action Toolbar & Filter -->
-    <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 14px; margin-bottom: 10px;">
-      <div class="tag-filter-bar" id="tag-filter-bar" style="margin-bottom: 0; padding-bottom: 0; flex: 1;">
-        <button class="filter-chip active" data-tag="all">All</button>
-        ${customTags.map((tag) => `
-          <button class="filter-chip" data-tag="${tag.id}" style="--tag-color: ${tag.color};">
-            ${tag.label}
-          </button>
-        `).join('')}
-        <button class="filter-chip" id="btn-manage-tags" style="border-style: dashed;">
-          + Tag
-        </button>
-      </div>
-      <button class="btn btn-sm btn-primary" id="btn-open-add-task" style="white-space: nowrap; flex-shrink: 0;">
-        + Add Action
-      </button>
     </div>
 
-    <!-- Task List Container -->
-    <div class="task-list" id="daily-task-list">
-      ${todayTasks.length === 0 ? `
-        <div class="card" style="text-align: center; color: var(--text-secondary); padding: 24px;">
-          No active tasks scheduled for today. Tap <strong>+ Add Action</strong> or <strong>Pull Next Task</strong> to begin!
+    <div class="multi-projects-container" style="display: flex; flex-direction: column; gap: 12px;">
+      ${activeProjects.length === 0 ? `
+        <div class="card" style="text-align: center; color: var(--text-secondary); padding: 18px;">
+          No tienes proyectos activos aún. Créalos en la pestaña <strong>Projects</strong>!
         </div>
-      ` : todayTasks.map((task) => renderTaskItem(task)).join('')}
-    </div>
-
-    <!-- Optional / Bonus Tasks Tray -->
-    ${optionalTasks.length > 0 ? `
-      <details class="card" style="margin-top: 14px; cursor: pointer;">
-        <summary style="font-size: 0.85rem; font-weight: 700; color: var(--text-secondary);">
-          🎁 Optional / Energy Bonus Tasks (${optionalTasks.length})
-        </summary>
-        <div class="task-list" style="margin-top: 10px;">
-          ${optionalTasks.map((task) => renderTaskItem(task)).join('')}
-        </div>
-      </details>
-    ` : ''}
-
-    <!-- Evening Reflection & Micro-Journaling -->
-    <div class="journal-card">
-      <div class="section-title" style="margin-bottom: 10px;">
-        <span>📖 Evening Reflection & Gratitude</span>
-        <span class="tag-badge" style="color: var(--color-xp);">+25 XP</span>
-      </div>
-      
-      <div class="input-group">
-        <label class="input-label">Today I'm grateful for (1-3 lines):</label>
-        <div class="gratitude-row">
-          <span class="gratitude-num">1.</span>
-          <input type="text" class="input-text gratitude-input" data-index="0" 
-            placeholder="A small win, person, or moment..." value="${escapeHtml(dailyLog.gratitudeItems?.[0] || '')}">
-        </div>
-        <div class="gratitude-row">
-          <span class="gratitude-num">2.</span>
-          <input type="text" class="input-text gratitude-input" data-index="1" 
-            placeholder="Something that made today easier..." value="${escapeHtml(dailyLog.gratitudeItems?.[1] || '')}">
-        </div>
-        <div class="gratitude-row">
-          <span class="gratitude-num">3.</span>
-          <input type="text" class="input-text gratitude-input" data-index="2" 
-            placeholder="A lesson or pleasant surprise..." value="${escapeHtml(dailyLog.gratitudeItems?.[2] || '')}">
-        </div>
-      </div>
-
-      <div class="input-group">
-        <label class="input-label">Micro-Journal (2-5 lines):</label>
-        <textarea class="textarea" id="daily-journal-input" placeholder="What went well today? What will I adjust tomorrow?">${escapeHtml(dailyLog.journalText || '')}</textarea>
-      </div>
-
-      <button class="btn btn-secondary" id="btn-save-journal" style="width: 100%;">
-        💾 Save Reflection & Claim XP
-      </button>
+      ` : activeProjects.map((proj) => renderMultiProjectCard(proj)).join('')}
     </div>
   `;
 
-  attachDailyEventListeners(container);
+  attachDailyEventListeners(container, selectedDate);
+}
+
+function renderMultiProjectCard(project) {
+  const activities = project.activities || [];
+  const completedCount = activities.filter(a => a.isCompleted).length;
+  const progress = activities.length > 0 ? Math.round((completedCount / activities.length) * 100) : 0;
+
+  return `
+    <div class="card" style="background: linear-gradient(135deg, #101c2e 0%, #13243a 100%); border-color: rgba(56, 189, 248, 0.25); padding: 12px 14px;">
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
+        <div>
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <span style="font-weight: 700; font-size: 0.95rem; color: var(--text-primary);">${escapeHtml(project.name)}</span>
+            <span class="tag-badge" style="font-size: 0.7rem;">${escapeHtml(project.category || 'General')}</span>
+          </div>
+          <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 2px;">
+            ${escapeHtml(project.description || '')}
+          </div>
+        </div>
+        <span style="font-size: 0.8rem; font-weight: 700; color: var(--color-primary);">${completedCount}/${activities.length} (${progress}%)</span>
+      </div>
+
+      <div class="goal-progress-bar" style="height: 4px; margin-bottom: 10px;">
+        <div class="goal-progress-fill" style="width: ${progress}%;"></div>
+      </div>
+
+      <!-- Activities list -->
+      <div class="task-list" style="margin-bottom: 0;">
+        ${activities.length === 0 ? `
+          <div style="font-size: 0.75rem; color: var(--text-muted); padding: 4px 0;">Sin actividades.</div>
+        ` : activities.map((act) => `
+          <div class="task-item ${act.isCompleted ? 'completed' : ''}" style="padding: 6px 10px; margin-bottom: 4px;">
+            <div class="task-checkbox ${act.isCompleted ? 'checked' : ''} btn-toggle-multi-project-activity" 
+                 data-project-id="${project._id}" data-activity-id="${act.id}">
+              ${act.isCompleted ? '✓' : ''}
+            </div>
+            <div class="task-body">
+              <div class="task-title" style="font-size: 0.82rem;">${escapeHtml(act.title)}</div>
+            </div>
+            <span class="tag-badge" style="color: var(--color-xp); font-size: 0.68rem;">+30 XP</span>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function renderCalendarDays(year, month, selectedDate, todayDate, tasks) {
+  const firstDayOfMonth = new Date(year, month, 1).getDay(); // 0 = Sun
+  // Convert to Monday = 0
+  const startDay = (firstDayOfMonth + 6) % 7;
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+  // Create task counts map for this month
+  const taskCounts = {};
+  tasks.forEach((t) => {
+    if (t.scheduledDate) {
+      taskCounts[t.scheduledDate] = (taskCounts[t.scheduledDate] || 0) + 1;
+    }
+  });
+
+  const cells = [];
+
+  // Empty leading days
+  for (let i = 0; i < startDay; i++) {
+    cells.push(`<div style="padding: 8px 2px; opacity: 0.2;"></div>`);
+  }
+
+  // Days of month
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dayStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    const isToday = dayStr === todayDate;
+    const isSelected = dayStr === selectedDate;
+    const count = taskCounts[dayStr] || 0;
+
+    cells.push(`
+      <div class="cal-day-cell ${isSelected ? 'selected' : ''} ${isToday ? 'today' : ''}" data-date="${dayStr}"
+        style="
+          padding: 6px 2px;
+          text-align: center;
+          border-radius: var(--radius-sm);
+          cursor: pointer;
+          background: ${isSelected ? 'var(--color-primary)' : isToday ? 'rgba(56, 189, 248, 0.15)' : 'rgba(255,255,255,0.03)'};
+          color: ${isSelected ? '#090d16' : isToday ? 'var(--color-primary)' : 'var(--text-primary)'};
+          font-weight: ${isSelected || isToday ? '800' : '500'};
+          font-size: 0.8rem;
+          position: relative;
+          transition: transform 0.1s ease;
+        ">
+        <span>${d}</span>
+        ${count > 0 ? `
+          <div style="width: 4px; height: 4px; border-radius: 50%; background: ${isSelected ? '#090d16' : 'var(--color-xp)'}; margin: 2px auto 0;"></div>
+        ` : ''}
+      </div>
+    `);
+  }
+
+  return cells.join('');
+}
+
+function getMonthName(monthIndex) {
+  const months = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+  return months[monthIndex];
 }
 
 function renderTaskItem(task) {
@@ -264,11 +388,11 @@ function renderTaskItem(task) {
         <div class="task-meta-row">
           <span class="difficulty-pill ${task.difficulty}">+${task.xpAwarded} XP</span>
           ${(task.tags || []).map(t => `<span class="tag-badge">${escapeHtml(t)}</span>`).join('')}
-          ${task.dueDate ? `<span class="tag-badge">📅 ${task.dueDate}</span>` : ''}
+          ${task.scheduledDate ? `<span class="tag-badge">📅 ${task.scheduledDate}</span>` : ''}
         </div>
       </div>
       <div class="task-actions">
-        <button class="btn btn-icon btn-ghost btn-delete-task" data-task-id="${task._id}" title="Delete">
+        <button class="btn btn-icon btn-ghost btn-delete-task" data-task-id="${task._id}" title="Eliminar">
           🗑️
         </button>
       </div>
@@ -276,7 +400,71 @@ function renderTaskItem(task) {
   `;
 }
 
-function attachDailyEventListeners(container) {
+function attachDailyEventListeners(container, selectedDate) {
+  // Calendar day clicks
+  container.querySelectorAll('.cal-day-cell').forEach((cell) => {
+    cell.addEventListener('click', () => {
+      calendarSelectedDate = cell.dataset.date;
+      renderDailyView(container);
+    });
+  });
+
+  // Calendar prev/next month
+  const btnPrev = container.querySelector('.btn-cal-prev');
+  if (btnPrev) {
+    btnPrev.addEventListener('click', () => {
+      calendarCurrentMonth--;
+      if (calendarCurrentMonth < 0) {
+        calendarCurrentMonth = 11;
+        calendarCurrentYear--;
+      }
+      renderDailyView(container);
+    });
+  }
+
+  const btnNext = container.querySelector('.btn-cal-next');
+  if (btnNext) {
+    btnNext.addEventListener('click', () => {
+      calendarCurrentMonth++;
+      if (calendarCurrentMonth > 11) {
+        calendarCurrentMonth = 0;
+        calendarCurrentYear++;
+      }
+      renderDailyView(container);
+    });
+  }
+
+  // Calendar "Hoy" button
+  const btnToday = container.querySelector('.btn-cal-today');
+  if (btnToday) {
+    btnToday.addEventListener('click', () => {
+      const now = new Date();
+      calendarCurrentMonth = now.getMonth();
+      calendarCurrentYear = now.getFullYear();
+      calendarSelectedDate = store.currentLogicalDate;
+      renderDailyView(container);
+    });
+  }
+
+  // Add task for selected date button
+  const btnAddForDate = container.querySelector('#btn-add-task-for-selected-date');
+  if (btnAddForDate) {
+    btnAddForDate.addEventListener('click', () => {
+      window.dispatchEvent(new CustomEvent('kizen-open-modal', {
+        detail: { modal: 'add-task', prefilledDate: selectedDate }
+      }));
+    });
+  }
+
+  const btnQuickCreate = container.querySelector('#btn-quick-create-task');
+  if (btnQuickCreate) {
+    btnQuickCreate.addEventListener('click', () => {
+      window.dispatchEvent(new CustomEvent('kizen-open-modal', {
+        detail: { modal: 'add-task', prefilledDate: selectedDate }
+      }));
+    });
+  }
+
   // Toggle Pillar Cards
   container.querySelectorAll('.pillar-card').forEach((card) => {
     card.addEventListener('click', async () => {
@@ -286,42 +474,19 @@ function attachDailyEventListeners(container) {
     });
   });
 
-  // Switch Active Project from dropdown
-  const projSelect = container.querySelector('#daily-select-active-project');
-  if (projSelect) {
-    projSelect.addEventListener('change', async (e) => {
-      await store.setActiveProject(e.target.value);
-      renderDailyView(container);
-    });
-  }
-
-  // Toggle Daily Activity from Active Project drawer
-  container.querySelectorAll('.btn-toggle-daily-activity').forEach((btn) => {
-    btn.addEventListener('click', async (e) => {
+  // Toggle Multi-Project Activities
+  container.querySelectorAll('.btn-toggle-multi-project-activity').forEach((box) => {
+    box.addEventListener('click', async (e) => {
       e.stopPropagation();
-      const projId = btn.dataset.projectId;
-      const actId = btn.dataset.activityId;
+      const projId = box.dataset.projectId;
+      const actId = box.dataset.activityId;
       await store.toggleActivityComplete(projId, actId);
       renderDailyView(container);
     });
   });
 
-  // Pull Next Task Button
-  const btnPull = container.querySelector('#btn-pull-next-task');
-  if (btnPull) {
-    btnPull.addEventListener('click', () => {
-      const next = store.getSuggestedNextTask();
-      const display = container.querySelector('#focus-task-display');
-      if (next) {
-        display.innerHTML = `<strong>Active Target:</strong> ${escapeHtml(next.title)}`;
-      } else {
-        display.innerText = 'No pending tasks found! Add a new task below.';
-      }
-    });
-  }
-
   // Toggle Task Completion
-  container.querySelectorAll('.task-checkbox:not(.btn-toggle-daily-activity)').forEach((box) => {
+  container.querySelectorAll('.task-checkbox:not(.btn-toggle-multi-project-activity)').forEach((box) => {
     box.addEventListener('click', async (e) => {
       e.stopPropagation();
       const taskId = box.dataset.taskId;
@@ -335,7 +500,7 @@ function attachDailyEventListeners(container) {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
       const taskId = btn.dataset.taskId;
-      if (confirm('Delete this task?')) {
+      if (confirm('¿Eliminar esta tarea?')) {
         await store.deleteTask(taskId);
         renderDailyView(container);
       }
@@ -352,18 +517,6 @@ function attachDailyEventListeners(container) {
     });
   });
 
-  // Save Reflection & Journal
-  const btnSaveJournal = container.querySelector('#btn-save-journal');
-  if (btnSaveJournal) {
-    btnSaveJournal.addEventListener('click', async () => {
-      const journalText = container.querySelector('#daily-journal-input').value;
-      const gratitudeInputs = Array.from(container.querySelectorAll('.gratitude-input')).map((i) => i.value.trim());
-      await store.saveReflection(journalText, gratitudeInputs);
-      alert('Reflection and gratitude saved! Mindfulness XP awarded.');
-      renderDailyView(container);
-    });
-  }
-
   // Tag filter chip toggles
   container.querySelectorAll('.filter-chip[data-tag]').forEach((chip) => {
     chip.addEventListener('click', () => {
@@ -378,7 +531,9 @@ function attachDailyEventListeners(container) {
   const btnAddTask = container.querySelector('#btn-open-add-task');
   if (btnAddTask) {
     btnAddTask.addEventListener('click', () => {
-      window.dispatchEvent(new CustomEvent('kizen-open-modal', { detail: { modal: 'add-task' } }));
+      window.dispatchEvent(new CustomEvent('kizen-open-modal', {
+        detail: { modal: 'add-task', prefilledDate: selectedDate }
+      }));
     });
   }
 

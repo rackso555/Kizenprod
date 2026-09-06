@@ -152,12 +152,13 @@ class DatabaseManager {
 
   async getAllDocsByType(type) {
     try {
+      const prefix = type === 'daily_log' ? 'daily:' : `${type}:`;
       const result = await this.localDb.allDocs({
         include_docs: true,
-        startkey: `${type}:`,
-        endkey: `${type}:\ufff0`
+        startkey: prefix,
+        endkey: `${prefix}\ufff0`
       });
-      return result.rows.map((row) => row.doc);
+      return result.rows.map((row) => row.doc).filter(d => d && (d.type === type || d._id?.startsWith(prefix)));
     } catch (err) {
       console.error(`Error querying docs of type ${type}:`, err);
       return [];

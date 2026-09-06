@@ -1,4 +1,4 @@
-const CACHE_NAME = 'kizen-app-v2';
+const CACHE_NAME = 'kizen-app-v3';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
@@ -21,6 +21,7 @@ const ASSETS_TO_CACHE = [
   './js/views/weeklyView.js',
   './js/views/monthlyView.js',
   './js/views/projectsView.js',
+  './js/views/journalView.js',
   './js/views/statsView.js'
 ];
 
@@ -79,6 +80,22 @@ self.addEventListener('fetch', (event) => {
         // Fallback to cached index.html
         return caches.match('./index.html');
       });
+    })
+  );
+});
+
+// Notification click handler: focus open window or open app
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      for (let i = 0; i < clientList.length; i++) {
+        const client = clientList[i];
+        if (client.url.includes('index.html') || client.url.endsWith('/')) {
+          return client.focus();
+        }
+      }
+      return clients.openWindow('./');
     })
   );
 });

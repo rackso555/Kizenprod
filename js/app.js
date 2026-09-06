@@ -5,11 +5,12 @@
 
 import { store } from './store.js';
 import { dbManager } from './db.js';
-import { calculateLevelData, DIFFICULTY_XP } from './gamification.js';
+import { calculateLevelData, BONUS_XP } from './gamification.js';
 import { renderDailyView } from './views/dailyView.js';
 import { renderWeeklyView } from './views/weeklyView.js';
 import { renderMonthlyView } from './views/monthlyView.js';
 import { renderProjectsView } from './views/projectsView.js';
+import { renderJournalView } from './views/journalView.js';
 import { renderStatsView } from './views/statsView.js';
 import { notificationEngine } from './notifications.js';
 
@@ -46,11 +47,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   store.subscribe((event, data) => {
     updateHeaderStatus();
     if (event === 'xp-gained') {
-      showToast(`⚡ +${data.amount} XP • ${data.reason || 'Activity Logged'}`, 'xp');
+      if (data.amount > 0) {
+        showToast(`⚡ +${data.amount} XP • ${data.reason || 'Actividad Registrada'}`, 'xp');
+      }
     } else if (event === 'level-up') {
-      showToast(`🎉 LEVEL UP! You reached Level ${data.newLevel} (${data.rankTitle})!`, 'level-up');
+      showToast(`🎉 ¡SUBISTE DE NIVEL! Alcanzaste el Nivel ${data.newLevel} (${data.rankTitle})!`, 'level-up');
     } else if (event === 'combo-achieved') {
-      showToast(`🔥 7/7 PILLARS COMBO! +50 XP Bonus Awarded!`, 'level-up');
+      showToast(`🔥 ¡COMBO 7/7 PILARES! ¡+50 XP Bonus Reclamado!`, 'level-up');
+    } else if (event === 'shield-earned') {
+      showToast(`🛡️ ¡+1 Escudo de Racha Ganado por hito semanal! (${data.freezeTokens} disponibles)`, 'xp');
+    } else if (event === 'shield-refilled') {
+      showToast(`🛡️ Escudo de racha recargado (${data.freezeTokens} disponibles)`, 'xp');
     }
 
     // Re-render current active view if appropriate
@@ -112,6 +119,9 @@ function renderActiveView() {
     case 'projects':
       renderProjectsView(container);
       break;
+    case 'journal':
+      renderJournalView(container);
+      break;
     case 'stats':
       renderStatsView(container);
       break;
@@ -145,10 +155,10 @@ function updateHeaderStatus() {
   const levelPill = document.querySelector('#header-level-pill');
 
   if (streakPill) {
-    streakPill.innerHTML = `🔥 ${profile.currentStreak || 0}`;
+    streakPill.textContent = `🔥 ${profile.currentStreak || 0}`;
   }
   if (levelPill) {
-    levelPill.innerHTML = `⭐ LVL ${levelData.level}`;
+    levelPill.textContent = `⭐ LVL ${levelData.level}`;
   }
 }
 
@@ -156,11 +166,10 @@ function updateHeaderStatus() {
 
 function setupModals() {
   const overlay = document.querySelector('#modal-overlay');
-  const modalContent = document.querySelector('#modal-dynamic-content');
 
   window.addEventListener('kizen-open-modal', (e) => {
     const modalType = e.detail?.modal;
-    openModal(modalType);
+    openModal(modalType, e.detail || {});
   });
 
   if (overlay) {
@@ -172,15 +181,15 @@ function setupModals() {
   }
 }
 
-function openModal(modalType) {
+function openModal(modalType, modalDetail = {}) {
   const overlay = document.querySelector('#modal-overlay');
   const modalContent = document.querySelector('#modal-dynamic-content');
   if (!overlay || !modalContent) return;
 
-  modalContent.innerHTML = getModalHtml(modalType);
+  modalContent.innerHTML = getModalHtml(modalType, modalDetail);
   overlay.classList.add('active');
 
-  attachModalHandlers(modalType, modalContent);
+  attachModalHandlers(modalType, modalContent, modalDetail);
 }
 
 function closeModal() {
@@ -190,30 +199,35 @@ function closeModal() {
   }
 }
 
-function getModalHtml(modalType) {
+function getModalHtml(modalType, modalDetail = {}) {
   switch (modalType) {
     case 'add-task':
+      const targetDate = modalDetail.prefilledDate || store.currentLogicalDate;
       return `
         <div class="modal-header">
-          <div class="modal-title">⚡ Add New Task</div>
+          <div class="modal-title">⚡ Nueva Tarea / Acción</div>
           <button class="btn btn-icon btn-ghost" id="btn-close-modal">✕</button>
         </div>
         <div class="input-group">
-          <label class="input-label">Task Title</label>
-          <input type="text" class="input-text" id="modal-task-title" placeholder="e.g. Write Chapter 3 or 30m Japanese vocab" autofocus>
+          <label class="input-label">Título de la Tarea</label>
+          <input type="text" class="input-text" id="modal-task-title" placeholder="ej. Estudiar 30m gramática JLPT o Escribir informe" autofocus>
         </div>
         <div class="input-group">
-          <label class="input-label">Difficulty & XP Reward</label>
+          <label class="input-label">Fecha Programada</label>
+          <input type="date" class="input-text" id="modal-task-date" value="${targetDate}">
+        </div>
+        <div class="input-group">
+          <label class="input-label">Dificultad & Recompensa XP</label>
           <select class="select" id="modal-task-difficulty">
             <option value="trivial">🟢 Trivial (+10 XP) - &lt; 5 mins</option>
-            <option value="easy" selected>🔵 Easy (+25 XP) - 15–30 mins</option>
-            <option value="medium">🟡 Medium (+50 XP) - 45–90 mins</option>
-            <option value="hard">🔴 Hard (+100 XP) - 2–4 hours</option>
-            <option value="epic">🟣 Epic (+250 XP) - Full Day Milestone</option>
+            <option value="easy" selected>🔵 Fácil (+25 XP) - 15–30 mins</option>
+            <option value="medium">🟡 Medio (+50 XP) - 45–90 mins</option>
+            <option value="hard">🔴 Difícil (+100 XP) - 2–4 horas</option>
+            <option value="epic">🟣 Épico (+250 XP) - Hito de todo el día</option>
           </select>
         </div>
         <div class="input-group">
-          <label class="input-label">Tags (click to select)</label>
+          <label class="input-label">Tags (click para seleccionar)</label>
           <div style="display: flex; flex-wrap: wrap; gap: 6px;" id="modal-tag-selector">
             ${store.customTags.map(t => `
               <label class="filter-chip" style="cursor: pointer;">
@@ -226,28 +240,28 @@ function getModalHtml(modalType) {
         <div class="input-group" style="display: flex; align-items: center; gap: 8px; margin-top: 8px;">
           <input type="checkbox" id="modal-task-optional" style="width: 18px; height: 18px;">
           <label for="modal-task-optional" class="input-label" style="margin: 0; cursor: pointer;">
-            Optional / Energy Bonus Task (No penalty if skipped)
+            Tarea Opcional / Bonus de Energía (Sin penalización)
           </label>
         </div>
         <button class="btn btn-primary" id="btn-submit-task" style="width: 100%; margin-top: 14px;">
-          + Create Task
+          + Crear Tarea
         </button>
       `;
 
     case 'manage-tags':
       return `
         <div class="modal-header">
-          <div class="modal-title">🏷️ Manage Custom Tags</div>
+          <div class="modal-title">🏷️ Administrar Etiquetas (Tags)</div>
           <button class="btn btn-icon btn-ghost" id="btn-close-modal">✕</button>
         </div>
         <div class="input-group">
-          <label class="input-label">New Tag Name</label>
-          <input type="text" class="input-text" id="modal-new-tag-name" placeholder="e.g. #marketing, #health">
+          <label class="input-label">Nombre del nuevo tag</label>
+          <input type="text" class="input-text" id="modal-new-tag-name" placeholder="ej. #marketing, #salud">
         </div>
         <button class="btn btn-primary" id="btn-submit-new-tag" style="width: 100%; margin-bottom: 16px;">
-          + Add Tag
+          + Añadir Tag
         </button>
-        <div class="section-subtitle" style="margin-bottom: 8px;">Existing Tags:</div>
+        <div class="section-subtitle" style="margin-bottom: 8px;">Tags Existentes:</div>
         <div style="display: flex; flex-wrap: wrap; gap: 8px;">
           ${store.customTags.map(t => `
             <div class="tag-badge" style="padding: 6px 10px; font-size: 0.8rem; display: flex; align-items: center; gap: 6px;">
@@ -261,87 +275,145 @@ function getModalHtml(modalType) {
     case 'add-weekly-goal':
       return `
         <div class="modal-header">
-          <div class="modal-title">📅 Add Weekly Sprint Goal</div>
+          <div class="modal-title">📅 Nuevo Objetivo Semanal (Sprint)</div>
           <button class="btn btn-icon btn-ghost" id="btn-close-modal">✕</button>
         </div>
         <div class="input-group">
-          <label class="input-label">Goal Title</label>
-          <input type="text" class="input-text" id="modal-goal-title" placeholder="e.g. Build PWA sync feature (+150 XP)">
+          <label class="input-label">Título del Objetivo</label>
+          <input type="text" class="input-text" id="modal-goal-title" placeholder="ej. Completar Módulo de Autenticación (+150 XP)">
         </div>
         <div class="input-group">
-          <label class="input-label">Description / Success Criteria</label>
-          <textarea class="textarea" id="modal-goal-desc" placeholder="What does completion look like?"></textarea>
+          <label class="input-label">Criterio de Éxito / Descripción</label>
+          <textarea class="textarea" id="modal-goal-desc" placeholder="¿Cómo sabrás que este sprint está cumplido?"></textarea>
         </div>
         <button class="btn btn-primary" id="btn-submit-weekly-goal" style="width: 100%; margin-top: 10px;">
-          + Create Weekly Goal
+          + Crear Objetivo Semanal
         </button>
       `;
 
     case 'add-monthly-goal':
       return `
         <div class="modal-header">
-          <div class="modal-title">🗓️ Add Monthly Objective (OKR)</div>
+          <div class="modal-title">🗓️ Nuevo Objetivo Mensual (OKR)</div>
           <button class="btn btn-icon btn-ghost" id="btn-close-modal">✕</button>
         </div>
         <div class="input-group">
-          <label class="input-label">Objective Title</label>
-          <input type="text" class="input-text" id="modal-monthly-title" placeholder="e.g. Master JLPT N4 Grammar (+500 XP)">
+          <label class="input-label">Título del Objetivo</label>
+          <input type="text" class="input-text" id="modal-monthly-title" placeholder="ej. Dominar Gramática N4 o Lanzar MVP (+500 XP)">
         </div>
         <div class="input-group">
-          <label class="input-label">Vision & Key Results</label>
-          <textarea class="textarea" id="modal-monthly-desc" placeholder="Target milestones for the month..."></textarea>
+          <label class="input-label">Visión & Resultados Clave</label>
+          <textarea class="textarea" id="modal-monthly-desc" placeholder="Metas e impacto esperado para este mes..."></textarea>
         </div>
         <button class="btn btn-primary" id="btn-submit-monthly-goal" style="width: 100%; margin-top: 10px;">
-          + Create Monthly Objective
+          + Crear Objetivo Mensual
         </button>
       `;
 
     case 'add-project':
       return `
         <div class="modal-header">
-          <div class="modal-title">📁 New Project Tree</div>
+          <div class="modal-title">📁 Nuevo Proyecto</div>
           <button class="btn btn-icon btn-ghost" id="btn-close-modal">✕</button>
         </div>
         <div class="input-group">
-          <label class="input-label">Project Name</label>
-          <input type="text" class="input-text" id="modal-project-name" placeholder="e.g. Build Mobile Workstation">
+          <label class="input-label">Nombre del Proyecto</label>
+          <input type="text" class="input-text" id="modal-project-name" placeholder="ej. Configuración de PWA y Servidor">
         </div>
         <div class="input-group">
-          <label class="input-label">Category</label>
-          <input type="text" class="input-text" id="modal-project-category" placeholder="e.g. Learning, Tech, Fitness, Work">
+          <label class="input-label">Categoría</label>
+          <input type="text" class="input-text" id="modal-project-category" placeholder="ej. Aprendizaje, Código, Fitness, Trabajo">
         </div>
         <div class="input-group">
-          <label class="input-label">Description</label>
-          <textarea class="textarea" id="modal-project-desc" placeholder="High-level project scope..."></textarea>
+          <label class="input-label">Descripción</label>
+          <textarea class="textarea" id="modal-project-desc" placeholder="Alcance general del proyecto..."></textarea>
         </div>
         <div class="input-group">
-          <label class="input-label">Initial Activities (comma separated)</label>
-          <input type="text" class="input-text" id="modal-project-activities" placeholder="e.g. Research specs, Order parts, Assemble hardware">
+          <label class="input-label">Actividades Iniciales (separadas por coma)</label>
+          <input type="text" class="input-text" id="modal-project-activities" placeholder="ej. Diseñar esquema, Implementar frontend, Pruebas">
         </div>
         <button class="btn btn-primary" id="btn-submit-project" style="width: 100%; margin-top: 10px;">
-          + Create Project
+          + Crear Proyecto
         </button>
       `;
 
     case 'cascade-breakdown':
+      const preselectedId = modalDetail.preselectedGoalId || '';
+      const availableMonthly = store.monthlyGoals.filter(g => !g.isCompleted);
+
       return `
         <div class="modal-header">
-          <div class="modal-title">⚡ Cascading Goal Breakdown Helper</div>
+          <div class="modal-title">🔨 Descomponer Objetivo Mensual</div>
           <button class="btn btn-icon btn-ghost" id="btn-close-modal">✕</button>
         </div>
+        
         <p style="font-size: 0.82rem; color: var(--text-secondary); margin-bottom: 12px;">
-          Select a goal to automatically generate 3 actionable daily tasks and eliminate friction!
+          Descompón un objetivo mensual grande en <strong>1 objetivo semanal</strong> y <strong>acciones diarias concretas</strong> (+75 XP de bonificación).
         </p>
+
+        <!-- Goal selection -->
         <div class="input-group">
-          <label class="input-label">Select Goal to Deconstruct</label>
-          <select class="select" id="modal-cascade-select">
-            ${store.weeklyGoals.map(g => `<option value="${g._id}">[Weekly] ${g.title}</option>`).join('')}
-            ${store.monthlyGoals.map(g => `<option value="${g._id}">[Monthly] ${g.title}</option>`).join('')}
+          <label class="input-label">Objetivo Mensual a Descomponer:</label>
+          <select class="select" id="modal-breakdown-goal-select">
+            ${availableMonthly.length === 0 ? '<option value="">Sin objetivos mensuales activos</option>' : ''}
+            ${availableMonthly.map(g => `
+              <option value="${g._id}" ${g._id === preselectedId ? 'selected' : ''}>
+                ${escapeHtml(g.title)}
+              </option>
+            `).join('')}
           </select>
         </div>
-        <button class="btn btn-xp" id="btn-submit-cascade-generate" style="width: 100%; margin-top: 12px;">
-          ✨ Generate 3 Daily Action Steps (+XP)
-        </button>
+
+        <!-- Manual Decomposition Section -->
+        <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 12px;">
+          <div style="font-size: 0.82rem; font-weight: 700; color: var(--color-primary); margin-bottom: 8px;">
+            1. Hito Semanal Intermedio (Sprint):
+          </div>
+          <input type="text" class="input-text" id="modal-breakdown-weekly-title" 
+            placeholder="ej. Sprint Semana 1: Esquema y componentes base" style="margin-bottom: 10px;">
+
+          <div style="font-size: 0.82rem; font-weight: 700; color: var(--color-xp); margin-bottom: 8px;">
+            2. Acciones Diarias Inmediatas (+XP):
+          </div>
+
+          <div class="breakdown-daily-tasks" style="display: flex; flex-direction: column; gap: 8px;">
+            <div style="display: flex; gap: 6px;">
+              <input type="text" class="input-text breakdown-task-title" placeholder="Paso 1: Configurar entorno y requisitos" style="flex: 2;">
+              <select class="select breakdown-task-diff" style="flex: 1;">
+                <option value="easy" selected>🔵 Fácil (+25)</option>
+                <option value="medium">🟡 Medio (+50)</option>
+                <option value="hard">🔴 Difícil (+100)</option>
+              </select>
+            </div>
+
+            <div style="display: flex; gap: 6px;">
+              <input type="text" class="input-text breakdown-task-title" placeholder="Paso 2: Desarrollar lógica principal" style="flex: 2;">
+              <select class="select breakdown-task-diff" style="flex: 1;">
+                <option value="medium" selected>🟡 Medio (+50)</option>
+                <option value="easy">🔵 Fácil (+25)</option>
+                <option value="hard">🔴 Difícil (+100)</option>
+              </select>
+            </div>
+
+            <div style="display: flex; gap: 6px;">
+              <input type="text" class="input-text breakdown-task-title" placeholder="Paso 3: Revisión, tests y pulido" style="flex: 2;">
+              <select class="select breakdown-task-diff" style="flex: 1;">
+                <option value="easy" selected>🔵 Fácil (+25)</option>
+                <option value="medium">🟡 Medio (+50)</option>
+                <option value="hard">🔴 Difícil (+100)</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 8px;">
+          <button class="btn btn-primary" id="btn-submit-manual-breakdown" style="flex: 2;">
+            💾 Descomponer y Guardar (+75 XP)
+          </button>
+          <button class="btn btn-secondary" id="btn-quick-auto-breakdown" style="flex: 1;" title="Rellenar con propuesta automática">
+            ✨ Auto-Llenar
+          </button>
+        </div>
       `;
 
     default:
@@ -349,7 +421,7 @@ function getModalHtml(modalType) {
   }
 }
 
-function attachModalHandlers(modalType, modalContent) {
+function attachModalHandlers(modalType, modalContent, modalDetail = {}) {
   const btnClose = modalContent.querySelector('#btn-close-modal');
   if (btnClose) btnClose.addEventListener('click', closeModal);
 
@@ -367,22 +439,24 @@ function attachModalHandlers(modalType, modalContent) {
     btnSubmit.addEventListener('click', async () => {
       const title = modalContent.querySelector('#modal-task-title').value;
       if (!title || !title.trim()) {
-        alert('Please enter a task title.');
+        alert('Por favor ingresa un título para la tarea.');
         return;
       }
+      const scheduledDate = modalContent.querySelector('#modal-task-date')?.value || store.currentLogicalDate;
       const difficulty = modalContent.querySelector('#modal-task-difficulty').value;
       const isOptional = modalContent.querySelector('#modal-task-optional').checked;
       const selectedTags = Array.from(modalContent.querySelectorAll('#modal-tag-selector input:checked')).map(i => i.value);
 
       await store.addTask({
         title,
+        scheduledDate,
         difficulty,
         isOptional,
         tags: selectedTags
       });
 
       closeModal();
-      showToast('Task added to Today!', 'xp');
+      showToast(`Tarea agregada para ${scheduledDate}!`, 'xp');
     });
   } else if (modalType === 'manage-tags') {
     const btnAdd = modalContent.querySelector('#btn-submit-new-tag');
@@ -409,7 +483,7 @@ function attachModalHandlers(modalType, modalContent) {
       if (title && title.trim()) {
         await store.addGoal({ period: 'weekly', title, description });
         closeModal();
-        showToast('Weekly goal added!', 'xp');
+        showToast('¡Objetivo semanal creado!', 'xp');
       }
     });
   } else if (modalType === 'add-monthly-goal') {
@@ -420,7 +494,7 @@ function attachModalHandlers(modalType, modalContent) {
       if (title && title.trim()) {
         await store.addGoal({ period: 'monthly', title, description });
         closeModal();
-        showToast('Monthly objective created!', 'xp');
+        showToast('¡Objetivo mensual creado!', 'xp');
       }
     });
   } else if (modalType === 'add-project') {
@@ -435,38 +509,78 @@ function attachModalHandlers(modalType, modalContent) {
       if (name && name.trim()) {
         await store.addProject({ name, category, description, activities });
         closeModal();
-        showToast('Project created!', 'xp');
+        showToast('¡Proyecto creado!', 'xp');
       }
     });
   } else if (modalType === 'cascade-breakdown') {
-    const btnSubmit = modalContent.querySelector('#btn-submit-cascade-generate');
-    btnSubmit.addEventListener('click', async () => {
-      const goalSelect = modalContent.querySelector('#modal-cascade-select');
-      const selectedId = goalSelect.value;
-      const goal = [...store.weeklyGoals, ...store.monthlyGoals].find(g => g._id === selectedId);
-      const title = goal ? goal.title : 'Goal Breakdown';
+    // Auto fill proposal button
+    const btnAuto = modalContent.querySelector('#btn-quick-auto-breakdown');
+    if (btnAuto) {
+      btnAuto.addEventListener('click', () => {
+        const goalSelect = modalContent.querySelector('#modal-breakdown-goal-select');
+        const selectedId = goalSelect.value;
+        const goal = store.monthlyGoals.find(g => g._id === selectedId);
+        const goalName = goal ? goal.title : 'Objetivo';
 
-      // Automatically generate 3 progressive action steps
-      await store.addTask({
-        title: `[Step 1] Initial Setup & Outline for: ${title}`,
-        difficulty: 'easy',
-        tags: ['#breakdown']
+        modalContent.querySelector('#modal-breakdown-weekly-title').value = `[Sprint 1] Hito de Arranque: ${goalName}`;
+        const taskInputs = modalContent.querySelectorAll('.breakdown-task-title');
+        if (taskInputs[0]) taskInputs[0].value = `Investigación y preparación para ${goalName}`;
+        if (taskInputs[1]) taskInputs[1].value = `Implementación del bloque principal de ${goalName}`;
+        if (taskInputs[2]) taskInputs[2].value = `Verificación, pulido y entrega de ${goalName}`;
       });
-      await store.addTask({
-        title: `[Step 2] Core Execution Block for: ${title}`,
-        difficulty: 'medium',
-        tags: ['#breakdown']
-      });
-      await store.addTask({
-        title: `[Step 3] Review & Polish: ${title}`,
-        difficulty: 'easy',
-        tags: ['#breakdown']
-      });
+    }
 
-      closeModal();
-      showToast('✨ 3 Daily Actions generated in Daily list!', 'xp');
-      switchView('daily');
-    });
+    // Submit Manual Breakdown
+    const btnSubmitManual = modalContent.querySelector('#btn-submit-manual-breakdown');
+    if (btnSubmitManual) {
+      btnSubmitManual.addEventListener('click', async () => {
+        const goalSelect = modalContent.querySelector('#modal-breakdown-goal-select');
+        const selectedId = goalSelect.value;
+        const weeklyTitle = modalContent.querySelector('#modal-breakdown-weekly-title').value.trim();
+        const taskRows = modalContent.querySelectorAll('.breakdown-daily-tasks > div');
+
+        let createdCount = 0;
+        let weeklyGoalId = null;
+
+        if (weeklyTitle) {
+          const wGoal = await store.addGoal({
+            period: 'weekly',
+            title: weeklyTitle,
+            parentMonthlyGoalId: selectedId || null
+          });
+          weeklyGoalId = wGoal._id;
+          createdCount++;
+        }
+
+        for (const row of taskRows) {
+          const title = row.querySelector('.breakdown-task-title')?.value.trim();
+          const difficulty = row.querySelector('.breakdown-task-diff')?.value || 'easy';
+          if (title) {
+            await store.addTask({
+              title,
+              difficulty,
+              scheduledDate: store.currentLogicalDate,
+              weeklyGoalId,
+              parentMonthlyGoalId: selectedId || null,
+              tags: ['#desglose']
+            });
+            createdCount++;
+          }
+        }
+
+        if (createdCount === 0) {
+          alert('Por favor ingresa al menos un objetivo semanal o una tarea diaria.');
+          return;
+        }
+
+        // Award Breakdown Bonus XP
+        await store.addXp(BONUS_XP.BREAKDOWN_BONUS || 75, 'Desglose de Objetivo Mensual');
+
+        closeModal();
+        showToast('✨ ¡Objetivo desglosado con éxito! +75 XP otorgados.', 'level-up');
+        switchView('daily');
+      });
+    }
   }
 }
 
@@ -480,6 +594,11 @@ function setupToastNotifications() {
     toastBox.className = 'toast-container';
     document.body.appendChild(toastBox);
   }
+
+  // Listen to custom notification event
+  window.addEventListener('kizen-show-toast', (e) => {
+    showToast(e.detail?.message || 'Notificación', e.detail?.type || 'info');
+  });
 }
 
 function showToast(message, type = 'info') {
@@ -493,5 +612,10 @@ function showToast(message, type = 'info') {
 
   setTimeout(() => {
     toast.remove();
-  }, 3000);
+  }, 3200);
+}
+
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }

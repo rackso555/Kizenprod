@@ -123,9 +123,12 @@ function renderMonthlyGoalCard(goal) {
         </div>
       </div>
 
-      <div class="goal-actions">
+      <div class="goal-actions" style="display: flex; gap: 6px; align-items: center;">
         <button class="btn btn-sm ${goal.isCompleted ? 'btn-secondary' : 'btn-primary'} btn-toggle-monthly-goal" data-goal-id="${goal._id}">
-          ${goal.isCompleted ? '✓ Completed' : 'Mark Achieved'}
+          ${goal.isCompleted ? '✓ Completado' : 'Marcar Logrado'}
+        </button>
+        <button class="btn btn-sm btn-xp btn-breakdown-this-goal" data-goal-id="${goal._id}" title="Descomponer en tareas semanales y diarias">
+          🔨 Descomponer
         </button>
         <button class="btn btn-icon btn-ghost btn-delete-monthly-goal" data-goal-id="${goal._id}">
           🗑️
@@ -156,6 +159,16 @@ function attachMonthlyEventListeners(container) {
       const goalId = btn.dataset.goalId;
       await store.toggleGoalComplete(goalId);
       renderMonthlyView(container);
+    });
+  });
+
+  container.querySelectorAll('.btn-breakdown-this-goal').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const goalId = btn.dataset.goalId;
+      window.dispatchEvent(new CustomEvent('kizen-open-modal', {
+        detail: { modal: 'cascade-breakdown', preselectedGoalId: goalId }
+      }));
     });
   });
 

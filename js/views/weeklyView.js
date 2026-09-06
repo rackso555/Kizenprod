@@ -113,13 +113,14 @@ export function renderWeeklyView(container) {
     <!-- Weekly Retrospective -->
     <div class="card">
       <div class="section-title" style="margin-bottom: 8px;">
-        <span>📝 Weekly Retrospective</span>
+        <span>📝 Retrospectiva Semanal</span>
+        <span class="tag-badge" style="color: var(--color-xp);">+50 XP</span>
       </div>
       <div class="input-group">
-        <label class="input-label">Wins & Key Takeaways:</label>
-        <textarea class="textarea" placeholder="What moved the needle this week?"></textarea>
+        <label class="input-label">Victorias & Aprendizajes Clave de la Semana ${currentWeekNumber}:</label>
+        <textarea class="textarea" id="input-weekly-retrospective" placeholder="¿Qué movió la aguja esta semana? ¿Qué ajustarás para el próximo sprint?">${escapeHtml(localStorage.getItem('kizen_weekly_review_week_' + currentWeekNumber) || '')}</textarea>
       </div>
-      <button class="btn btn-secondary btn-sm">Save Weekly Review</button>
+      <button class="btn btn-secondary btn-sm" id="btn-save-weekly-retrospective">💾 Guardar Revisión Semanal</button>
     </div>
   `;
 
@@ -165,6 +166,29 @@ function attachWeeklyEventListeners(container) {
   if (btnAdd) {
     btnAdd.addEventListener('click', () => {
       window.dispatchEvent(new CustomEvent('kizen-open-modal', { detail: { modal: 'add-weekly-goal' } }));
+    });
+  }
+
+  // Save Weekly Retrospective
+  const btnSaveRetro = container.querySelector('#btn-save-weekly-retrospective');
+  if (btnSaveRetro) {
+    btnSaveRetro.addEventListener('click', async () => {
+      const text = container.querySelector('#input-weekly-retrospective')?.value.trim();
+      if (!text) {
+        alert('Por favor escribe tus reflexiones o victorias de la semana.');
+        return;
+      }
+      const weekNum = getWeekNumber(new Date());
+      const key = `kizen_weekly_review_week_${weekNum}`;
+      const isFirstTime = !localStorage.getItem(key);
+      localStorage.setItem(key, text);
+
+      if (isFirstTime) {
+        await store.addXp(50, `Revisión Semanal de la Semana ${weekNum}`);
+      }
+
+      alert('¡Revisión semanal guardada con éxito!');
+      renderWeeklyView(container);
     });
   }
 

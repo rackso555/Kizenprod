@@ -16,8 +16,12 @@ export const BONUS_XP = {
   PILLAR_COMBO: 50,
   JOURNAL_SAVED: 25,
   WEEKLY_GOAL_MET: 150,
-  MONTHLY_GOAL_MET: 500
+  MONTHLY_GOAL_MET: 500,
+  BREAKDOWN_BONUS: 75
 };
+
+export const MAX_FREEZE_SHIELDS = 3;
+export const FREEZE_SHIELD_COST_XP = 100;
 
 // Level Progression Titles
 export const LEVEL_RANKS = [
@@ -122,6 +126,7 @@ export function updateStreakStatus(profile, todayLogicalDate, wasActiveToday = t
 
   let currentStreak = profile.currentStreak || 0;
   let freezeTokens = profile.freezeTokens ?? 1;
+  const oldStreak = profile.currentStreak || 0;
 
   if (diffDays === 1) {
     // Consecutive day
@@ -139,13 +144,23 @@ export function updateStreakStatus(profile, todayLogicalDate, wasActiveToday = t
     currentStreak = wasActiveToday ? 1 : 0;
   }
 
+  // Automatic refill: When reaching any multiple of 7 consecutive days, earn +1 Freeze Shield (up to max capacity 3)
+  let shieldEarned = false;
+  if (currentStreak > 0 && currentStreak % 7 === 0 && currentStreak > oldStreak) {
+    if (freezeTokens < MAX_FREEZE_SHIELDS) {
+      freezeTokens += 1;
+      shieldEarned = true;
+    }
+  }
+
   const longestStreak = Math.max(profile.longestStreak || 0, currentStreak);
 
   return {
     currentStreak,
     longestStreak,
     lastActiveDate: wasActiveToday ? todayLogicalDate : lastActive,
-    freezeTokens
+    freezeTokens,
+    shieldEarned
   };
 }
 

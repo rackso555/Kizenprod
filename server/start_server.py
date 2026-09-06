@@ -22,10 +22,24 @@ def get_lan_ip():
         return "127.0.0.1"
 
 class CORSRequestHandler(http.server.SimpleHTTPRequestHandler):
+    # Allowed origins: GitHub Pages host and local dev
+    ALLOWED_ORIGINS = {
+        'https://rackso555.github.io',
+        'http://localhost:8080',
+        'http://127.0.0.1:8080',
+    }
+
     def end_headers(self):
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, DELETE')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+        origin = self.headers.get('Origin', '')
+        if origin in self.ALLOWED_ORIGINS:
+            self.send_header('Access-Control-Allow-Origin', origin)
+        elif not origin:
+            # Direct browser request (no CORS preflight needed)
+            pass
+        else:
+            self.send_header('Access-Control-Allow-Origin', 'https://rackso555.github.io')
+        self.send_header('Access-Control-Allow-Methods', 'GET, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
         super().end_headers()
 

@@ -10,6 +10,8 @@ import {
   BONUS_XP,
   updateStreakStatus,
   calculateLevelData,
+  MAX_FREEZE_SHIELDS,
+  FREEZE_SHIELD_COST_XP,
   sfx
 } from './gamification.js';
 
@@ -22,6 +24,7 @@ class Store {
     this.monthlyGoals = [];
     this.projects = [];
     this.customTags = [];
+    this.journalEntries = [];
     this.subscribers = new Set();
     this.currentLogicalDate = getLogicalDate();
   }
@@ -65,12 +68,64 @@ class Store {
       this.loadTasks(),
       this.loadGoals(),
       this.loadProjects(),
-      this.loadTags()
+      this.loadTags(),
+      this.loadJournalEntries()
     ]);
     this.notify('initial-load-complete');
   }
 
-  // --- Profile & Gamification Store ---
+  // --- Profile, Streaks & Gamification Store ---
+
+  async refillFreezeShield(costInXp = FREEZE_SHIELD_COST_XP) {
+    if (!this.profile) return { success: false, error: 'No profile found' };
+    const currentTokens = this.profile.freezeTokens ?? 1;
+    if (currentTokens >= MAX_FREEZE_SHIELDS) {
+      return { success: false, error: `Ya alcanzaste la capacidad máxima de escudos (${MAX_FREEZE_SHIELDS}).` };
+    }
+    if (this.profile.totalXp < costInXp) {
+      return { success: false, error: `XP insuficiente. Requiere ${costInXp} XP (tienes ${this.profile.totalXp} XP).` };
+    }
+
+    this.profile.totalXp -= costInXp;
+    this.profile.freezeTokens = currentTokens + 1;
+    await dbManager.putDoc(this.profile);
+    sfx.playComboBonus();
+    this.notify('shield-refilled', { freezeTokens: this.profile.freezeTokens, totalXp: this.profile.totalXp });
+    this.notify('xp-gained', { amount: -costInXp, reason: 'Recarga de Escudo de Racha', totalXp: this.profile.totalXp });
+    return { success: true, freezeTokens: this.profile.freezeTokens };
+  }
+
+  async addXp(amount, reason = '') {
+    if (!this.profile) return;
+    const prevLevelData = calculateLevelData(this.profile.totalXp);
+    this.profile.totalXp += amount;
+    const newLevelData = calculateLevelData(this.profile.totalXp);
+
+    // Update streak on active XP gain
+    const streakUpdate = updateStreakStatus(this.profile, this.currentLogicalDate, true);
+    Object.assign(this.profile, streakUpdate);
+
+    if (streakUpdate.shieldEarned) {
+      this.notify('shield-earned', { freezeTokens: this.profile.freezeTokens });
+    }
+
+    await dbManager.putDoc(this.profile);
+
+    // Level up check
+    if (newLevelData.level > prevLevelData.level) {
+      sfx.playLevelUp();
+      if (typeof confetti === 'function') {
+        confetti({ particleCount: 80, spread: 70, origin: { y: 0.6 } });
+      }
+      this.notify('level-up', {
+        oldLevel: prevLevelData.level,
+        newLevel: newLevelData.level,
+        rankTitle: newLevelData.rankTitle
+      });
+    }
+
+    this.notify('xp-gained', { amount, reason, totalXp: this.profile.totalXp });
+  }
 
   async loadProfile() {
     let profileDoc = await dbManager.getDoc('user_profile');
@@ -161,34 +216,6 @@ class Store {
     this.profile = profileDoc;
   }
 
-  async addXp(amount, reason = '') {
-    if (!this.profile) return;
-    const prevLevelData = calculateLevelData(this.profile.totalXp);
-    this.profile.totalXp += amount;
-    const newLevelData = calculateLevelData(this.profile.totalXp);
-
-    // Update streak on active XP gain
-    const streakUpdate = updateStreakStatus(this.profile, this.currentLogicalDate, true);
-    Object.assign(this.profile, streakUpdate);
-
-    await dbManager.putDoc(this.profile);
-
-    // Level up check
-    if (newLevelData.level > prevLevelData.level) {
-      sfx.playLevelUp();
-      if (typeof confetti === 'function') {
-        confetti({ particleCount: 80, spread: 70, origin: { y: 0.6 } });
-      }
-      this.notify('level-up', {
-        oldLevel: prevLevelData.level,
-        newLevel: newLevelData.level,
-        rankTitle: newLevelData.rankTitle
-      });
-    }
-
-    this.notify('xp-gained', { amount, reason, totalXp: this.profile.totalXp });
-  }
-
   // --- 7 Daily Pillars Store ---
 
   async loadDailyLog() {
@@ -254,23 +281,85 @@ class Store {
     }
   }
 
-  // --- Micro-Journal & Gratitude ---
+  async getPillarConsistencyStats() {
+    if (!this.profile) return [];
+    const allDailyLogs = await dbManager.getAllDocsByType('daily_log');
+    const totalDaysRecorded = Math.max(1, allDailyLogs.length);
 
-  async saveReflection(journalText, gratitudeItems) {
-    if (!this.dailyLog) return;
-    const isFirstTimeToday = !this.dailyLog.journalText && (!this.dailyLog.gratitudeItems || !this.dailyLog.gratitudeItems.some(Boolean));
+    return this.profile.pillars.map((pillar) => {
+      const daysCompleted = allDailyLogs.filter(
+        (log) => Array.isArray(log.pillarsCompleted) && log.pillarsCompleted.includes(pillar.id)
+      ).length;
+      const percentage = Math.round((daysCompleted / totalDaysRecorded) * 100);
 
-    this.dailyLog.journalText = journalText;
-    this.dailyLog.gratitudeItems = gratitudeItems;
-    await dbManager.putDoc(this.dailyLog);
+      return {
+        id: pillar.id,
+        name: pillar.name,
+        icon: pillar.icon,
+        daysCompleted,
+        totalDaysRecorded,
+        percentage
+      };
+    });
+  }
 
-    if (isFirstTimeToday && (journalText || gratitudeItems.some(Boolean))) {
-      sfx.playTaskComplete();
-      await this.addXp(BONUS_XP.JOURNAL_SAVED, 'Daily Reflection & Gratitude Logged');
+  // --- Dedicated Journal & Gratitude Store ---
+
+  async loadJournalEntries() {
+    this.journalEntries = await dbManager.getAllDocsByType('journal_entry');
+    this.journalEntries.sort((a, b) => new Date(b.date || b.createdAt) - new Date(a.date || a.createdAt));
+  }
+
+  async saveJournalEntry(entryData) {
+    const entryDate = entryData.date || this.currentLogicalDate;
+    const existing = this.journalEntries.find((e) => e.date === entryDate || (entryData._id && e._id === entryData._id));
+    const isNew = !existing;
+
+    const doc = {
+      _id: existing?._id || `journal_entry:${entryDate}_${Math.random().toString(36).substr(2, 6)}`,
+      type: 'journal_entry',
+      date: entryDate,
+      gratitudeItems: entryData.gratitudeItems || ['', '', ''],
+      journalText: entryData.journalText || '',
+      tags: entryData.tags || [],
+      mood: entryData.mood || 'neutral',
+      updatedAt: new Date().toISOString(),
+      createdAt: existing?.createdAt || new Date().toISOString()
+    };
+
+    const savedDoc = await dbManager.putDoc(doc);
+
+    // Sync with this.dailyLog if it is for today
+    if (entryDate === this.currentLogicalDate && this.dailyLog) {
+      this.dailyLog.journalText = doc.journalText;
+      this.dailyLog.gratitudeItems = doc.gratitudeItems;
+      await dbManager.putDoc(this.dailyLog);
+      this.notify('daily-log-updated', this.dailyLog);
     }
 
-    this.notify('daily-log-updated', this.dailyLog);
-    return { success: true };
+    if (isNew && (doc.journalText || doc.gratitudeItems.some(Boolean))) {
+      sfx.playTaskComplete();
+      await this.addXp(BONUS_XP.JOURNAL_SAVED, 'Entrada de Diario y Reflexión Guardada');
+    }
+
+    await this.loadJournalEntries();
+    this.notify('journal-updated', this.journalEntries);
+    return savedDoc;
+  }
+
+  async deleteJournalEntry(entryId) {
+    await dbManager.removeDoc(entryId);
+    this.journalEntries = this.journalEntries.filter((e) => e._id !== entryId);
+    this.notify('journal-updated', this.journalEntries);
+  }
+
+  async saveReflection(journalText, gratitudeItems) {
+    return await this.saveJournalEntry({
+      date: this.currentLogicalDate,
+      journalText,
+      gratitudeItems,
+      tags: ['#diario']
+    });
   }
 
   // --- Tasks & Action Items Store ---
@@ -492,6 +581,15 @@ class Store {
     return doc;
   }
 
+  async updateProject(project) {
+    await dbManager.putDoc(project);
+    const idx = this.projects.findIndex((p) => p._id === project._id);
+    if (idx !== -1) {
+      this.projects[idx] = project;
+    }
+    this.notify('projects-updated', this.projects);
+  }
+
   async toggleActivityComplete(projectId, activityId) {
     const project = this.projects.find((p) => p._id === projectId);
     if (!project) return;
@@ -544,6 +642,11 @@ class Store {
       if (found) return found;
     }
     return this.projects[0];
+  }
+
+  getActiveProjects() {
+    if (!this.projects || this.projects.length === 0) return [];
+    return this.projects.filter((p) => p.status !== 'archived');
   }
 
   // --- Smart "Pull Next Task" Engine ---

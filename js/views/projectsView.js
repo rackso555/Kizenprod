@@ -280,7 +280,7 @@ function attachProjectsEventListeners(container) {
             title: actTitle.trim(),
             isCompleted: false
           });
-          store.addProject(project).then(() => renderProjectsView(container));
+          store.updateProject(project).then(() => renderProjectsView(container));
         }
       }
     });
