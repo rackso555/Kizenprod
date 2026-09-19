@@ -250,6 +250,27 @@ function getModalHtml(modalType, modalDetail = {}) {
           <input type="date" class="input-text" id="modal-task-date" value="${targetDate}">
         </div>
         <div class="input-group">
+          <label class="input-label">Prioridad (Matriz Eisenhower)</label>
+          <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px;" id="modal-priority-selector">
+            <label class="filter-chip" style="cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px; border-color: rgba(239, 68, 68, 0.4);">
+              <input type="radio" name="modal-priority" value="p1" style="display: none;">
+              🔴 P1 Urgente
+            </label>
+            <label class="filter-chip active" style="cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px; border-color: rgba(245, 158, 11, 0.4);">
+              <input type="radio" name="modal-priority" value="p2" checked style="display: none;">
+              🟡 P2 Importante
+            </label>
+            <label class="filter-chip" style="cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px; border-color: rgba(56, 189, 248, 0.4);">
+              <input type="radio" name="modal-priority" value="p3" style="display: none;">
+              🔵 P3 Rutina
+            </label>
+            <label class="filter-chip" style="cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px; border-color: rgba(255, 255, 255, 0.2);">
+              <input type="radio" name="modal-priority" value="p4" style="display: none;">
+              ⚪ P4 Backlog
+            </label>
+          </div>
+        </div>
+        <div class="input-group">
           <label class="input-label">Dificultad & Recompensa XP</label>
           <select class="select" id="modal-task-difficulty">
             <option value="trivial">🟢 Trivial (+10 XP) - &lt; 5 mins</option>
@@ -261,13 +282,17 @@ function getModalHtml(modalType, modalDetail = {}) {
         </div>
         <div class="input-group">
           <label class="input-label">Tags (click para seleccionar)</label>
-          <div style="display: flex; flex-wrap: wrap; gap: 6px;" id="modal-tag-selector">
+          <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px;" id="modal-tag-selector">
             ${store.customTags.map(t => `
               <label class="filter-chip" style="cursor: pointer;">
                 <input type="checkbox" value="${t.label}" style="display: none;">
                 ${t.label}
               </label>
             `).join('')}
+          </div>
+          <div style="display: flex; gap: 6px;">
+            <input type="text" class="input-text input-sm" id="modal-quick-create-tag-input" placeholder="+ Crear nuevo tag... ej. #marketing" style="font-size: 0.78rem; padding: 6px 10px; flex: 1;">
+            <button class="btn btn-sm btn-secondary" id="btn-modal-quick-create-tag" type="button" style="font-size: 0.75rem; padding: 6px 10px; white-space: nowrap;">+ Añadir</button>
           </div>
         </div>
         <div class="input-group" style="display: flex; align-items: center; gap: 8px; margin-top: 8px;">
@@ -297,9 +322,9 @@ function getModalHtml(modalType, modalDetail = {}) {
         <div class="section-subtitle" style="margin-bottom: 8px;">Tags Existentes:</div>
         <div style="display: flex; flex-wrap: wrap; gap: 8px;">
           ${store.customTags.map(t => `
-            <div class="tag-badge" style="padding: 6px 10px; font-size: 0.8rem; display: flex; align-items: center; gap: 6px;">
-              <span>${t.label}</span>
-              <button class="btn-delete-tag-btn" data-tag-id="${t.id}" style="background: none; border: none; color: var(--color-danger); cursor: pointer;">✕</button>
+            <div class="tag-badge" style="padding: 6px 10px; font-size: 0.8rem; display: flex; align-items: center; gap: 8px; background: ${t.color ? t.color + '22' : 'rgba(255,255,255,0.08)'}; color: ${t.color || 'var(--text-primary)'}; border: 1px solid ${t.color || 'var(--border-subtle)'};">
+              <span style="font-weight: 600;">${t.label}</span>
+              <button class="btn-delete-tag-btn" data-tag-id="${t.id}" style="background: none; border: none; color: var(--color-danger); cursor: pointer; font-size: 0.85rem; font-weight: bold; line-height: 1; padding: 0;" title="Eliminar etiqueta">✕</button>
             </div>
           `).join('')}
         </div>
@@ -459,6 +484,16 @@ function attachModalHandlers(modalType, modalContent, modalDetail = {}) {
   if (btnClose) btnClose.addEventListener('click', closeModal);
 
   if (modalType === 'add-task') {
+    // Priority chip selection toggles
+    modalContent.querySelectorAll('#modal-priority-selector .filter-chip').forEach((chip) => {
+      chip.addEventListener('click', () => {
+        modalContent.querySelectorAll('#modal-priority-selector .filter-chip').forEach(c => c.classList.remove('active'));
+        const radio = chip.querySelector('input');
+        if (radio) radio.checked = true;
+        chip.classList.add('active');
+      });
+    });
+
     // Tag chip selection toggles
     modalContent.querySelectorAll('#modal-tag-selector .filter-chip').forEach((chip) => {
       chip.addEventListener('click', () => {
@@ -468,24 +503,70 @@ function attachModalHandlers(modalType, modalContent, modalDetail = {}) {
       });
     });
 
+    // Quick tag creation inside modal
+    const btnQuickAddTag = modalContent.querySelector('#btn-modal-quick-create-tag');
+    const inputQuickTag = modalContent.querySelector('#modal-quick-create-tag-input');
+    const handleQuickAddTag = async () => {
+      if (!inputQuickTag || !inputQuickTag.value.trim()) return;
+      const tagLabel = inputQuickTag.value.trim();
+      const newTag = await store.addCustomTag(tagLabel);
+      if (newTag) {
+        const selector = modalContent.querySelector('#modal-tag-selector');
+        if (selector) {
+          const chip = document.createElement('label');
+          chip.className = 'filter-chip active';
+          chip.style.cursor = 'pointer';
+          chip.innerHTML = `<input type="checkbox" value="${newTag.label}" checked style="display: none;"> ${newTag.label}`;
+          chip.addEventListener('click', () => {
+            const cb = chip.querySelector('input');
+            cb.checked = !cb.checked;
+            chip.classList.toggle('active', cb.checked);
+          });
+          selector.appendChild(chip);
+        }
+        inputQuickTag.value = '';
+      }
+    };
+    if (btnQuickAddTag) btnQuickAddTag.addEventListener('click', handleQuickAddTag);
+    if (inputQuickTag) {
+      inputQuickTag.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          handleQuickAddTag();
+        }
+      });
+    }
+
     const btnSubmit = modalContent.querySelector('#btn-submit-task');
     btnSubmit.addEventListener('click', async () => {
-      const title = modalContent.querySelector('#modal-task-title').value;
-      if (!title || !title.trim()) {
+      const rawTitle = modalContent.querySelector('#modal-task-title').value;
+      if (!rawTitle || !rawTitle.trim()) {
         alert('Por favor ingresa un título para la tarea.');
         return;
       }
+
+      // Parse inline #tags and priority tokens (p1-p4)
+      const parsed = store.parseTaskInput(rawTitle);
+      for (const t of parsed.tags) {
+        await store.addCustomTag(t);
+      }
+
       const scheduledDate = modalContent.querySelector('#modal-task-date')?.value || store.currentLogicalDate;
       const difficulty = modalContent.querySelector('#modal-task-difficulty').value;
       const isOptional = modalContent.querySelector('#modal-task-optional').checked;
-      const selectedTags = Array.from(modalContent.querySelectorAll('#modal-tag-selector input:checked')).map(i => i.value);
+      const radioPriority = modalContent.querySelector('#modal-priority-selector input:checked')?.value;
+      const finalPriority = (parsed.priority !== 'p2' && parsed.priority) ? parsed.priority : (radioPriority || 'p2');
+
+      const checkedTags = Array.from(modalContent.querySelectorAll('#modal-tag-selector input:checked')).map(i => i.value);
+      const allTags = Array.from(new Set([...checkedTags, ...parsed.tags]));
 
       await store.addTask({
-        title,
+        title: parsed.title,
         scheduledDate,
         difficulty,
         isOptional,
-        tags: selectedTags
+        priority: finalPriority,
+        tags: allTags
       });
 
       closeModal();

@@ -10,6 +10,7 @@ import { calculateLevelData, MAX_FREEZE_SHIELDS, FREEZE_SHIELD_COST_XP } from '.
 import { notificationEngine } from '../notifications.js';
 
 let activitySearchQuery = '';
+let heatmapRangePreset = 'all'; // '30d' | '90d' | 'ytd' | 'all'
 
 export async function renderStatsView(container) {
   const { profile, tasks, projects } = store;
@@ -18,8 +19,10 @@ export async function renderStatsView(container) {
   const levelData = calculateLevelData(profile.totalXp);
   const completedTasks = tasks.filter(t => t.isCompleted);
   
-  // Real Pillar Consistency Stats
+  // Real Pillar Consistency Stats & Real Daily Logs for Heatmap
   const pillarStats = await store.getPillarConsistencyStats();
+  const allDailyLogs = await dbManager.getAllDocsByType('daily_log');
+  const heatmapData = generateRealHeatmapData(allDailyLogs, tasks, store.currentLogicalDate, heatmapRangePreset);
 
   const savedRemoteUrl = localStorage.getItem('kizen_couchdb_url') || '';
   const notifSettings = notificationEngine.settings;
@@ -113,30 +116,42 @@ export async function renderStatsView(container) {
       </div>
     </div>
 
-    <!-- 365-Day Activity Heatmap -->
+    <!-- Real Activity Heatmap (100% Real Logs!) -->
     <div class="heatmap-card">
-      <div class="section-title" style="margin-bottom: 8px;">
-        <span>🔥 Mapa de Calor Anual (365 Días)</span>
+      <div class="section-title" style="margin-bottom: 6px;">
+        <span>🔥 Mapa de Calor de Actividad Real</span>
       </div>
-      <p style="font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 12px;">
-        Intensidad de productividad diaria (ciclo con reinicio a las 5:00 AM).
+      <p style="font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 10px;">
+        Intensidad de productividad basada 100% en tus registros guardados (ciclo 5:00 AM).
       </p>
+
+      <!-- Range Preset Buttons -->
+      <div style="display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap;">
+        <button class="btn btn-sm ${heatmapRangePreset === '30d' ? 'btn-primary' : 'btn-ghost'} btn-heatmap-range" data-range="30d" style="font-size: 0.72rem; padding: 4px 8px;">30 Días</button>
+        <button class="btn btn-sm ${heatmapRangePreset === '90d' ? 'btn-primary' : 'btn-ghost'} btn-heatmap-range" data-range="90d" style="font-size: 0.72rem; padding: 4px 8px;">90 Días</button>
+        <button class="btn btn-sm ${heatmapRangePreset === 'ytd' ? 'btn-primary' : 'btn-ghost'} btn-heatmap-range" data-range="ytd" style="font-size: 0.72rem; padding: 4px 8px;">Año Actual</button>
+        <button class="btn btn-sm ${heatmapRangePreset === 'all' ? 'btn-primary' : 'btn-ghost'} btn-heatmap-range" data-range="all" style="font-size: 0.72rem; padding: 4px 8px;">★ Todo (${heatmapData.earliestDate})</button>
+      </div>
 
       <div class="heatmap-scroll-container">
         <div class="heatmap-grid" id="stats-heatmap-grid">
-          ${renderHeatmapCells(profile.totalXp)}
+          ${heatmapData.htmlCells}
         </div>
       </div>
 
-      <div class="heatmap-legend">
+      <!-- Cell Info Display Bar (Hover/Click) -->
+      <div id="heatmap-cell-inspector" style="font-size: 0.78rem; color: var(--text-secondary); margin-top: 8px; min-height: 20px; font-weight: 600;">
+        Pasa el cursor o toca una celda para ver métricas del día.
+      </div>
+
+      <div class="heatmap-legend" style="margin-top: 8px;">
         <span>Menos</span>
         <div class="legend-cells">
-          <div class="heatmap-cell"></div>
-          <div class="heatmap-cell l1"></div>
-          <div class="heatmap-cell l2"></div>
-          <div class="heatmap-cell l3"></div>
-          <div class="heatmap-cell l4"></div>
-          <div class="heatmap-cell l5"></div>
+          <div class="heatmap-cell" title="0 XP / Sin registro"></div>
+          <div class="heatmap-cell l1" title="1-49 XP"></div>
+          <div class="heatmap-cell l2" title="50-99 XP"></div>
+          <div class="heatmap-cell l3" title="100-199 XP"></div>
+          <div class="heatmap-cell l4" title="200+ XP"></div>
         </div>
         <span>Más</span>
       </div>
@@ -322,9 +337,9 @@ export async function renderStatsView(container) {
         <span>💾 Copia de Seguridad & Portabilidad</span>
       </div>
       <p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 12px;">
-        Exporta tu base de datos completa a un archivo JSON offline o restaura tus datos.
+        Exporta tu base de datos completa a un archivo JSON offline, restaura tus datos o recupera el último snapshot local.
       </p>
-      <div style="display: flex; gap: 8px;">
+      <div style="display: flex; gap: 8px; flex-wrap: wrap;">
         <button class="btn btn-secondary btn-sm" id="btn-export-backup">
           📥 Exportar Copia JSON
         </button>
@@ -332,6 +347,9 @@ export async function renderStatsView(container) {
           📤 Importar Copia
           <input type="file" id="input-import-backup" accept=".json" style="display: none;">
         </label>
+        <button class="btn btn-secondary btn-sm" id="btn-restore-safety-snapshot" style="border-style: dashed;" title="Restaura la última copia de seguridad automática guardada localmente">
+          🛡️ Restaurar Snapshot Local
+        </button>
       </div>
     </div>
   `;
@@ -339,27 +357,81 @@ export async function renderStatsView(container) {
   attachStatsEventListeners(container);
 }
 
-function renderHeatmapCells(totalXp) {
+function generateRealHeatmapData(dailyLogs, tasks, currentLogicalDate, rangePreset) {
+  const logMap = {};
+  (dailyLogs || []).forEach((l) => { if (l && l.date) logMap[l.date] = l; });
+
+  const taskCounts = {};
+  (tasks || []).forEach((t) => {
+    if (t.isCompleted && t.scheduledDate) {
+      taskCounts[t.scheduledDate] = (taskCounts[t.scheduledDate] || 0) + 1;
+    }
+  });
+
+  // Collect real dates recorded
+  const datesRecorded = Object.keys(logMap);
+  Object.keys(taskCounts).forEach((d) => {
+    if (!datesRecorded.includes(d)) datesRecorded.push(d);
+  });
+  if (!datesRecorded.includes(currentLogicalDate)) {
+    datesRecorded.push(currentLogicalDate);
+  }
+  datesRecorded.sort();
+
+  const earliestDate = datesRecorded[0] || currentLogicalDate;
+  const now = new Date(currentLogicalDate + 'T12:00:00');
+
+  let startDate = new Date(earliestDate + 'T12:00:00');
+  if (rangePreset === '30d') {
+    startDate = new Date(now);
+    startDate.setDate(startDate.getDate() - 29);
+  } else if (rangePreset === '90d') {
+    startDate = new Date(now);
+    startDate.setDate(startDate.getDate() - 89);
+  } else if (rangePreset === 'ytd') {
+    startDate = new Date(now.getFullYear(), 0, 1, 12, 0, 0);
+  }
+
+  if (startDate > now) startDate = new Date(now);
+
   const cells = [];
-  const now = new Date();
-  
-  for (let i = 364; i >= 0; i--) {
-    const d = new Date(now);
-    d.setDate(d.getDate() - i);
-    
+  const curr = new Date(startDate);
+
+  while (curr <= now) {
+    const dStr = curr.toISOString().slice(0, 10);
+    const log = logMap[dStr];
+    const tCount = taskCounts[dStr] || 0;
+    const pCount = (log?.pillarsCompleted || []).length;
+    const xp = log?.totalXpEarned || 0;
+
     let levelClass = '';
-    if (i < 14) {
-      levelClass = i % 2 === 0 ? 'l3' : 'l4';
-    } else if (i % 5 === 0) {
+    if (xp >= 200 || pCount >= 6) {
+      levelClass = 'l4';
+    } else if (xp >= 100 || pCount >= 4) {
+      levelClass = 'l3';
+    } else if (xp >= 50 || pCount >= 2) {
       levelClass = 'l2';
-    } else if (i % 9 === 0) {
+    } else if (xp > 0 || pCount > 0 || tCount > 0) {
       levelClass = 'l1';
     }
 
-    cells.push(`<div class="heatmap-cell ${levelClass}" title="${d.toISOString().slice(0, 10)}"></div>`);
+    cells.push(`
+      <div class="heatmap-cell ${levelClass}"
+           data-date="${dStr}"
+           data-xp="${xp}"
+           data-pillars="${pCount}"
+           data-tasks="${tCount}"
+           title="${dStr}: +${xp} XP • ${pCount}/7 pilares • ${tCount} tareas">
+      </div>
+    `);
+
+    curr.setDate(curr.getDate() + 1);
   }
 
-  return cells.join('');
+  return {
+    htmlCells: cells.join(''),
+    earliestDate
+  };
 }
 
 function attachStatsEventListeners(container) {
@@ -474,6 +546,47 @@ function attachStatsEventListeners(container) {
       a.download = `kizen_backup_${new Date().toISOString().slice(0, 10)}.json`;
       a.click();
       URL.revokeObjectURL(url);
+    });
+  }
+
+  // Restore Safety Snapshot
+  const btnRestoreSnapshot = container.querySelector('#btn-restore-safety-snapshot');
+  if (btnRestoreSnapshot) {
+    btnRestoreSnapshot.addEventListener('click', async () => {
+      if (confirm('¿Restaurar la última copia de seguridad automática (snapshot) guardada en este dispositivo?')) {
+        const res = await dbManager.restoreSafetySnapshot();
+        if (res.success) {
+          alert(`¡${res.count} documentos restaurados exitosamente! Recargando datos...`);
+          await store.loadInitialData();
+          renderStatsView(container);
+        } else {
+          alert(res.error || 'No se pudo restaurar el snapshot.');
+        }
+      }
+    });
+  }
+
+  // Heatmap Range Preset Buttons
+  container.querySelectorAll('.btn-heatmap-range').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      heatmapRangePreset = btn.dataset.range;
+      renderStatsView(container);
+    });
+  });
+
+  // Heatmap Cell Inspector (Hover & Tap)
+  const inspector = container.querySelector('#heatmap-cell-inspector');
+  if (inspector) {
+    container.querySelectorAll('.heatmap-cell[data-date]').forEach((cell) => {
+      const showInfo = () => {
+        const d = cell.dataset.date;
+        const xp = cell.dataset.xp || 0;
+        const p = cell.dataset.pillars || 0;
+        const t = cell.dataset.tasks || 0;
+        inspector.innerHTML = `📅 <strong>${d}</strong> — <span style="color: var(--color-xp); font-weight: 800;">+${xp} XP</span> • 🏛️ <strong>${p}/7</strong> pilares • ✅ <strong>${t}</strong> tareas completadas`;
+      };
+      cell.addEventListener('mouseenter', showInfo);
+      cell.addEventListener('click', showInfo);
     });
   }
 

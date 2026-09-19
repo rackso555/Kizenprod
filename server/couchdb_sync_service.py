@@ -173,6 +173,19 @@ class SyncServer(http.server.BaseHTTPRequestHandler):
 
         db = self._load_db()
 
+        if path in ['/kizen_productivity_db/_revs_diff', '/kizen_productivity_db/_revs_diff/']:
+            diff_res = {}
+            for doc_id, revs in data.items():
+                if not isinstance(revs, list):
+                    continue
+                server_doc = db["docs"].get(doc_id)
+                server_rev = server_doc.get("_rev") if server_doc else None
+                missing_revs = [r for r in revs if r != server_rev]
+                if missing_revs:
+                    diff_res[doc_id] = {"missing": missing_revs}
+            self._send_json(200, diff_res)
+            return
+
         if path in ['/kizen_productivity_db/_bulk_docs', '/kizen_productivity_db/_bulk_docs/']:
             docs = data.get("docs", [])
             response_rows = []
@@ -211,6 +224,37 @@ class SyncServer(http.server.BaseHTTPRequestHandler):
         if path in ['/kizen_productivity_db', '/kizen_productivity_db/']:
             self._send_json(201, {"ok": True})
             return
+
+        if path.startswith('/kizen_productivity_db/'):
+            doc_id = path[len('/kizen_productivity_db/'):]
+            content_length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(content_length).decode('utf-8')
+            try:
+                doc = json.loads(body) if body else {}
+            except json.JSONDecodeError:
+                self._send_json(400, {"error": "bad_request", "reason": "Invalid JSON body"})
+                return
+
+            db = self._load_db()
+            db["seq"] = db.get("seq", 0) + 1
+
+            rev_num = 1
+            if "_rev" in doc:
+                try:
+                    rev_num = int(doc["_rev"].split("-")[0]) + 1
+                except Exception:
+                    rev_num = 2
+
+            new_rev = f"{rev_num}-{int(time.time()*1000)}"
+            doc["_id"] = doc_id
+            doc["_rev"] = new_rev
+            doc["_seq"] = db["seq"]
+            db["docs"][doc_id] = doc
+            self._save_db(db)
+
+            self._send_json(201, {"ok": True, "id": doc_id, "rev": new_rev})
+            return
+
         self._send_json(200, {"ok": True})
 
 def main():

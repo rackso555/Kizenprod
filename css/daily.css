@@ -440,3 +440,88 @@
   transform: scale(1.15);
 }
 
+/* --- Pillar Accordion & Subtasks Styles --- */
+.pillar-accordion-card {
+  transition: transform 0.15s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.pillar-accordion-card:hover {
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.pillar-accordion-card.completed {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.05) 0%, rgba(16, 185, 129, 0.01) 100%);
+}
+
+.pillar-subtask-item {
+  transition: background 0.15s ease;
+}
+
+.pillar-subtask-item:hover {
+  background: rgba(255, 255, 255, 0.05) !important;
+}
+
+/* --- Eisenhower 2x2 Matrix Styles --- */
+.eisenhower-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+@media (max-width: 640px) {
+  .eisenhower-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.eisenhower-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 140px;
+}
+
+/* Priority Badges */
+.priority-pill {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.68rem;
+  font-weight: 700;
+  border-radius: 4px;
+  padding: 2px 6px;
+  letter-spacing: 0.02em;
+}
+
+.priority-pill.p1 {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.priority-pill.p2 {
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.15);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.priority-pill.p3 {
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.15);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+}
+
+.priority-pill.p4 {
+  color: #94a3b8;
+  background: rgba(148, 163, 184, 0.15);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+}
+
+/* Quick Capture Box */
+.quick-capture-box {
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.quick-capture-box:focus-within {
+  border-color: var(--color-primary) !important;
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.2);
+}
+

@@ -10,10 +10,12 @@ import {
   formatDisplayDate
 } from '../gamification.js';
 
-// Internal state for interactive calendar
+// Internal state for interactive calendar & views
 let calendarSelectedDate = null;
 let calendarCurrentMonth = new Date().getMonth();
 let calendarCurrentYear = new Date().getFullYear();
+let dailyTasksViewMode = 'list'; // 'list' | 'matrix'
+let expandedPillarIds = new Set(['hygiene']); // first pillar expanded by default
 
 export function renderDailyView(container) {
   const { profile, dailyLog, tasks, projects, weeklyGoals, monthlyGoals, customTags, currentLogicalDate } = store;
@@ -34,6 +36,10 @@ export function renderDailyView(container) {
   const dateTasks = tasks.filter(
     (t) => (t.scheduledDate === selectedDate || (!t.scheduledDate && isSelectedDateToday)) && !t.isOptional
   );
+  // Sort tasks: P1 first, then P2, P3, P4
+  const pWeight = { p1: 1, p2: 2, p3: 3, p4: 4 };
+  dateTasks.sort((a, b) => (pWeight[a.priority || 'p2'] || 2) - (pWeight[b.priority || 'p2'] || 2));
+
   const optionalTasks = tasks.filter(
     (t) => (t.scheduledDate === selectedDate || (!t.scheduledDate && isSelectedDateToday)) && t.isOptional
   );
@@ -146,22 +152,45 @@ export function renderDailyView(container) {
       </div>
     </div>
 
-    <!-- 4. Action List for Selected Date & Rollovers -->
-    <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; margin-bottom: 10px;">
-      <div class="tag-filter-bar" id="tag-filter-bar" style="margin-bottom: 0; padding-bottom: 0; flex: 1;">
-        <button class="filter-chip active" data-tag="all">Todos</button>
-        ${customTags.map((tag) => `
-          <button class="filter-chip" data-tag="${tag.id}" style="--tag-color: ${tag.color};">
-            ${tag.label}
-          </button>
-        `).join('')}
-        <button class="filter-chip" id="btn-manage-tags" style="border-style: dashed;">
-          + Tag
+    <!-- 4. Quick Task Capture Bar (Inline syntax: #tags, p1-p4) -->
+    <div class="card quick-capture-box" style="margin-bottom: 12px; padding: 10px 14px; background: rgba(56, 189, 248, 0.04); border: 1px solid rgba(56, 189, 248, 0.25);">
+      <div style="font-size: 0.76rem; font-weight: 700; color: var(--color-primary); margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
+        <span>⚡ Captura Rápida de Acción</span>
+        <span style="font-size: 0.7rem; color: var(--text-muted); font-weight: normal;">Usa #tag y p1/p2/p3/p4</span>
+      </div>
+      <div style="display: flex; gap: 8px;">
+        <input type="text" class="input-text" id="input-quick-task" placeholder="ej. Terminar reporte de métricas #deepwork p1" style="flex: 1; font-size: 0.84rem; padding: 8px 12px;">
+        <button class="btn btn-primary btn-sm" id="btn-submit-quick-task" style="white-space: nowrap; padding: 0 14px; font-weight: 700;">+ Crear</button>
+      </div>
+    </div>
+
+    <!-- 5. Action List / Matrix Toolbar -->
+    <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; flex-wrap: wrap;">
+      <!-- View mode switch -->
+      <div style="display: flex; gap: 4px; background: rgba(255,255,255,0.05); padding: 3px; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle);">
+        <button class="btn btn-sm ${dailyTasksViewMode === 'list' ? 'btn-primary' : 'btn-ghost'}" id="btn-toggle-view-list" style="font-size: 0.76rem; padding: 4px 10px;">📋 Lista</button>
+        <button class="btn btn-sm ${dailyTasksViewMode === 'matrix' ? 'btn-primary' : 'btn-ghost'}" id="btn-toggle-view-matrix" style="font-size: 0.76rem; padding: 4px 10px;">🗂️ Matriz 2x2</button>
+      </div>
+
+      <div style="display: flex; align-items: center; gap: 6px;">
+        <button class="btn btn-sm btn-secondary" id="btn-manage-tags-fixed" style="font-size: 0.76rem; padding: 5px 10px;">
+          🏷️ Tags (${customTags.length})
+        </button>
+        <button class="btn btn-sm btn-primary" id="btn-open-add-task" style="white-space: nowrap; font-size: 0.76rem; padding: 5px 12px;">
+          + Acción
         </button>
       </div>
-      <button class="btn btn-sm btn-primary" id="btn-open-add-task" style="white-space: nowrap; flex-shrink: 0;">
-        + Acción
-      </button>
+    </div>
+
+    <!-- Tag Filter Bar -->
+    <div class="tag-filter-bar" id="tag-filter-bar" style="margin-bottom: 12px; padding-bottom: 4px;">
+      <button class="filter-chip active" data-tag="all">Todos</button>
+      ${customTags.map((tag) => `
+        <button class="filter-chip" data-tag="${tag.id}" style="--tag-color: ${tag.color};">
+          ${tag.label}
+        </button>
+      `).join('')}
+      <button class="filter-chip btn-ghost" id="btn-manage-tags" style="border: 1px dashed var(--border-medium); font-size: 0.72rem;">⚙️ Tags</button>
     </div>
 
     <!-- Yesterday's Rollover Tasks (if today) -->
@@ -193,15 +222,21 @@ export function renderDailyView(container) {
       </div>
     ` : ''}
 
-    <!-- Task List Container for selected date -->
-    <div class="task-list" id="daily-task-list">
-      ${dateTasks.length === 0 ? `
-        <div class="card" style="text-align: center; color: var(--text-secondary); padding: 22px;">
-          No hay tareas programadas para ${formatDisplayDate(selectedDate)}.
-          <br><button class="btn btn-sm btn-secondary" id="btn-quick-create-task" style="margin-top: 10px;">+ Crear Tarea para este día</button>
-        </div>
-      ` : dateTasks.map((task) => renderTaskItem(task)).join('')}
-    </div>
+    <!-- Action Tasks View (List or Eisenhower Matrix) -->
+    ${dailyTasksViewMode === 'matrix' ? `
+      <div id="eisenhower-matrix-container">
+        ${renderEisenhowerMatrix(dateTasks)}
+      </div>
+    ` : `
+      <div class="task-list" id="daily-task-list">
+        ${dateTasks.length === 0 ? `
+          <div class="card" style="text-align: center; color: var(--text-secondary); padding: 22px;">
+            No hay tareas programadas para ${formatDisplayDate(selectedDate)}.
+            <br><button class="btn btn-sm btn-secondary" id="btn-quick-create-task" style="margin-top: 10px;">+ Crear Tarea para este día</button>
+          </div>
+        ` : dateTasks.map((task) => renderTaskItem(task)).join('')}
+      </div>
+    `}
 
     <!-- Optional / Bonus Tasks Tray -->
     ${optionalTasks.length > 0 ? `
@@ -215,13 +250,13 @@ export function renderDailyView(container) {
       </details>
     ` : ''}
 
-    <!-- 5. The 7 Daily Pillars Section -->
+    <!-- 6. The 7 Daily Pillars Section with Subtasks Accordion -->
     <div class="section-header" style="margin-top: 24px;">
       <div class="section-title">
-        <span>🏛️ Los 7 Pilares Diarios</span>
-        <span class="section-subtitle">(${completedPillarsCount}/${totalPillarsCount})</span>
+        <span>🏛️ Los 7 Pilares Diarios & Hábitos</span>
+        <span class="section-subtitle">(${completedPillarsCount}/${totalPillarsCount} Completos)</span>
       </div>
-      <span class="section-subtitle">Reinicio 5:00 AM</span>
+      <span class="section-subtitle">Reinicio 5:00 AM • +5 XP por hábito</span>
     </div>
 
     ${isAllPillarsCompleted ? `
@@ -232,24 +267,8 @@ export function renderDailyView(container) {
       </div>
     ` : ''}
 
-    <div class="pillars-grid" id="pillars-grid-container" style="margin-bottom: 24px;">
-      ${profile.pillars.map((pillar) => {
-        const isDone = dailyLog.pillarsCompleted.includes(pillar.id);
-        return `
-          <div class="pillar-card ${isDone ? 'completed' : ''}" data-pillar-id="${pillar.id}">
-            <div class="pillar-info">
-              <span class="pillar-icon">${pillar.icon}</span>
-              <div class="pillar-text-group">
-                <span class="pillar-name">${pillar.name}</span>
-                <span class="pillar-subtext" title="${pillar.subtext}">${pillar.subtext}</span>
-              </div>
-            </div>
-            <div class="pillar-check-box">
-              ${isDone ? '✓' : ''}
-            </div>
-          </div>
-        `;
-      }).join('')}
+    <div class="pillars-accordion-list" id="pillars-container" style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 24px;">
+      ${profile.pillars.map((pillar) => renderPillarCard(pillar, dailyLog)).join('')}
     </div>
 
     <!-- 6. Multi-Project Dashboard Section (See more than 1 project at once!) -->
@@ -377,7 +396,148 @@ function getMonthName(monthIndex) {
   return months[monthIndex];
 }
 
+function renderPillarCard(pillar, dailyLog) {
+  const isDone = dailyLog.pillarsCompleted?.includes(pillar.id);
+  const subtasks = pillar.subtasks || [];
+  const completedSubtasks = dailyLog.pillarSubtasksCompleted?.[pillar.id] || [];
+  const completedCount = completedSubtasks.length;
+  const totalCount = subtasks.length;
+  const isExpanded = expandedPillarIds.has(pillar.id);
+
+  return `
+    <div class="card pillar-accordion-card ${isDone ? 'completed' : ''}" style="padding: 0; overflow: hidden; border-left: 4px solid ${isDone ? 'var(--color-success)' : 'var(--color-primary)'}; margin-bottom: 0;">
+      <div class="pillar-accordion-header" style="padding: 12px 14px; display: flex; align-items: center; justify-content: space-between; background: rgba(255,255,255,0.02);">
+        <div style="display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; cursor: pointer;" class="btn-toggle-pillar-accordion" data-pillar-id="${pillar.id}">
+          <span class="pillar-chevron" style="font-size: 0.75rem; color: var(--text-muted); width: 14px; text-align: center;">
+            ${isExpanded ? '▼' : '▶'}
+          </span>
+          <span class="pillar-icon" style="font-size: 1.25rem;">${pillar.icon}</span>
+          <div class="pillar-text-group" style="min-width: 0; flex: 1;">
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <span class="pillar-name" style="font-size: 0.9rem; font-weight: 700;">${escapeHtml(pillar.name)}</span>
+              ${totalCount > 0 ? `
+                <span class="tag-badge" style="font-size: 0.68rem; padding: 2px 6px; font-weight: 700; background: ${completedCount === totalCount ? 'rgba(16, 185, 129, 0.2)' : 'rgba(255,255,255,0.06)'}; color: ${completedCount === totalCount ? 'var(--color-success)' : 'var(--text-secondary)'};">
+                  ${completedCount}/${totalCount}
+                </span>
+              ` : ''}
+            </div>
+            <span class="pillar-subtext" style="font-size: 0.74rem; color: var(--text-secondary); display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+              ${escapeHtml(pillar.subtext || pillar.description || '')}
+            </span>
+          </div>
+        </div>
+
+        <div class="pillar-header-actions" style="display: flex; align-items: center; gap: 8px; margin-left: 8px;">
+          <div class="pillar-check-box ${isDone ? 'checked' : ''} btn-toggle-master-pillar" data-pillar-id="${pillar.id}" title="Completar todo el pilar (+15 XP)" style="cursor: pointer; width: 28px; height: 28px; border-radius: var(--radius-sm); border: 2px solid ${isDone ? 'var(--color-success)' : 'var(--border-medium)'}; background: ${isDone ? 'var(--color-success)' : 'transparent'}; display: flex; align-items: center; justify-content: center; font-weight: 800; color: white;">
+            ${isDone ? '✓' : ''}
+          </div>
+        </div>
+      </div>
+
+      <!-- Collapsible Subtasks Panel -->
+      ${isExpanded ? `
+        <div class="pillar-subtasks-panel" style="padding: 10px 14px 12px; border-top: 1px solid var(--border-subtle); background: rgba(0,0,0,0.18);">
+          <div class="pillar-subtasks-list" style="display: flex; flex-direction: column; gap: 6px;">
+            ${subtasks.length === 0 ? `
+              <div style="font-size: 0.78rem; color: var(--text-muted); font-style: italic; padding: 4px 0;">
+                No hay hábitos definidos para este pilar. ¡Añade tu primera subtarea abajo!
+              </div>
+            ` : subtasks.map((sub) => {
+              const subDone = completedSubtasks.includes(sub.id);
+              return `
+                <div class="pillar-subtask-item ${subDone ? 'completed' : ''}" style="display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; border-radius: var(--radius-sm); background: rgba(255,255,255,0.02);">
+                  <div style="display: flex; align-items: center; gap: 8px; flex: 1; cursor: pointer;" class="btn-toggle-subtask" data-pillar-id="${pillar.id}" data-subtask-id="${sub.id}">
+                    <div class="task-checkbox ${subDone ? 'checked' : ''}" style="width: 18px; height: 18px; font-size: 0.75rem; border-radius: 4px; display: flex; align-items: center; justify-content: center; border: 1.5px solid ${subDone ? 'var(--color-success)' : 'var(--border-medium)'}; background: ${subDone ? 'var(--color-success)' : 'transparent'}; color: white;">
+                      ${subDone ? '✓' : ''}
+                    </div>
+                    <span style="font-size: 0.82rem; color: ${subDone ? 'var(--text-muted)' : 'var(--text-primary)'}; text-decoration: ${subDone ? 'line-through' : 'none'};">
+                      ${escapeHtml(sub.title)}
+                    </span>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 6px;">
+                    <span style="font-size: 0.68rem; font-weight: 700; color: var(--color-xp);">+${sub.xp || 5} XP</span>
+                    <button class="btn btn-icon btn-ghost btn-delete-subtask" data-pillar-id="${pillar.id}" data-subtask-id="${sub.id}" style="padding: 2px 6px; font-size: 0.75rem; color: var(--text-muted);" title="Eliminar hábito">✕</button>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+
+          <!-- Add new subtask row -->
+          <div class="add-subtask-form" style="display: flex; gap: 6px; margin-top: 10px;">
+            <input type="text" class="input-text input-sm input-new-subtask" data-pillar-id="${pillar.id}" placeholder="+ Añadir hábito para ${escapeHtml(pillar.name)} (+5 XP)..." style="font-size: 0.78rem; padding: 6px 10px; flex: 1;">
+            <button class="btn btn-sm btn-secondary btn-submit-new-subtask" data-pillar-id="${pillar.id}" style="font-size: 0.75rem; padding: 6px 10px;">
+              Añadir
+            </button>
+          </div>
+        </div>
+      ` : ''}
+    </div>
+  `;
+}
+
+function renderEisenhowerMatrix(tasks) {
+  const q1 = tasks.filter(t => (t.priority || 'p2') === 'p1');
+  const q2 = tasks.filter(t => (t.priority || 'p2') === 'p2');
+  const q3 = tasks.filter(t => (t.priority || 'p2') === 'p3');
+  const q4 = tasks.filter(t => (t.priority || 'p2') === 'p4');
+
+  return `
+    <div class="eisenhower-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; margin-bottom: 16px;">
+      <!-- Q1: Urgente & Importante -->
+      <div class="card eisenhower-card q-p1" style="border-left: 4px solid var(--color-danger); background: rgba(239, 68, 68, 0.04); margin-bottom: 0;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <span style="font-size: 0.82rem; font-weight: 800; color: var(--color-danger);">🔴 P1: Urgente & Importante</span>
+          <span class="tag-badge" style="font-size: 0.68rem; background: rgba(239, 68, 68, 0.15); color: var(--color-danger); font-weight: 700;">Hazlo Ya (${q1.length})</span>
+        </div>
+        <div class="task-list">
+          ${q1.length === 0 ? '<div style="font-size: 0.78rem; color: var(--text-muted); font-style: italic; padding: 8px 0;">Sin tareas urgentes prioritarias</div>' : q1.map(renderTaskItem).join('')}
+        </div>
+      </div>
+
+      <!-- Q2: Importante, No Urgente -->
+      <div class="card eisenhower-card q-p2" style="border-left: 4px solid var(--color-xp); background: rgba(245, 158, 11, 0.04); margin-bottom: 0;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <span style="font-size: 0.82rem; font-weight: 800; color: var(--color-xp);">🟡 P2: Importante, No Urgente</span>
+          <span class="tag-badge" style="font-size: 0.68rem; background: rgba(245, 158, 11, 0.15); color: var(--color-xp); font-weight: 700;">Deep Work (${q2.length})</span>
+        </div>
+        <div class="task-list">
+          ${q2.length === 0 ? '<div style="font-size: 0.78rem; color: var(--text-muted); font-style: italic; padding: 8px 0;">Sin tareas estratégicas de sprint</div>' : q2.map(renderTaskItem).join('')}
+        </div>
+      </div>
+
+      <!-- Q3: Urgente, No Importante -->
+      <div class="card eisenhower-card q-p3" style="border-left: 4px solid var(--color-primary); background: rgba(56, 189, 248, 0.04); margin-bottom: 0;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <span style="font-size: 0.82rem; font-weight: 800; color: var(--color-primary);">🔵 P3: Urgente, No Importante</span>
+          <span class="tag-badge" style="font-size: 0.68rem; background: rgba(56, 189, 248, 0.15); color: var(--color-primary); font-weight: 700;">Rutina / Delegar (${q3.length})</span>
+        </div>
+        <div class="task-list">
+          ${q3.length === 0 ? '<div style="font-size: 0.78rem; color: var(--text-muted); font-style: italic; padding: 8px 0;">Sin tareas operativas rápidas</div>' : q3.map(renderTaskItem).join('')}
+        </div>
+      </div>
+
+      <!-- Q4: No Urgente, Ni Importante -->
+      <div class="card eisenhower-card q-p4" style="border-left: 4px solid var(--text-muted); background: rgba(255, 255, 255, 0.02); margin-bottom: 0;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <span style="font-size: 0.82rem; font-weight: 800; color: var(--text-secondary);">⚪ P4: Baja Prioridad</span>
+          <span class="tag-badge" style="font-size: 0.68rem; background: rgba(255, 255, 255, 0.08); color: var(--text-secondary); font-weight: 700;">Backlog (${q4.length})</span>
+        </div>
+        <div class="task-list">
+          ${q4.length === 0 ? '<div style="font-size: 0.78rem; color: var(--text-muted); font-style: italic; padding: 8px 0;">Sin tareas en backlog</div>' : q4.map(renderTaskItem).join('')}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 function renderTaskItem(task) {
+  const p = task.priority || 'p2';
+  const pBadge = p === 'p1' ? '<span class="priority-pill p1" style="font-size: 0.68rem; font-weight: 700; color: #ef4444; background: rgba(239, 68, 68, 0.15); padding: 2px 6px; border-radius: 4px;">🔴 P1</span>'
+    : p === 'p3' ? '<span class="priority-pill p3" style="font-size: 0.68rem; font-weight: 700; color: #38bdf8; background: rgba(56, 189, 248, 0.15); padding: 2px 6px; border-radius: 4px;">🔵 P3</span>'
+    : p === 'p4' ? '<span class="priority-pill p4" style="font-size: 0.68rem; font-weight: 700; color: #94a3b8; background: rgba(148, 163, 184, 0.15); padding: 2px 6px; border-radius: 4px;">⚪ P4</span>'
+    : '<span class="priority-pill p2" style="font-size: 0.68rem; font-weight: 700; color: #f59e0b; background: rgba(245, 158, 11, 0.15); padding: 2px 6px; border-radius: 4px;">🟡 P2</span>';
+
   return `
     <div class="task-item ${task.isCompleted ? 'completed' : ''}" data-task-id="${task._id}">
       <div class="task-checkbox ${task.isCompleted ? 'checked' : ''}" data-task-id="${task._id}">
@@ -386,6 +546,7 @@ function renderTaskItem(task) {
       <div class="task-body">
         <div class="task-title">${escapeHtml(task.title)}</div>
         <div class="task-meta-row">
+          ${pBadge}
           <span class="difficulty-pill ${task.difficulty}">+${task.xpAwarded} XP</span>
           ${(task.tags || []).map(t => `<span class="tag-badge">${escapeHtml(t)}</span>`).join('')}
           ${task.scheduledDate ? `<span class="tag-badge">📅 ${task.scheduledDate}</span>` : ''}
@@ -465,12 +626,126 @@ function attachDailyEventListeners(container, selectedDate) {
     });
   }
 
-  // Toggle Pillar Cards
-  container.querySelectorAll('.pillar-card').forEach((card) => {
-    card.addEventListener('click', async () => {
-      const pillarId = card.dataset.pillarId;
+  // Quick Task Capture
+  const inputQuick = container.querySelector('#input-quick-task');
+  const btnSubmitQuick = container.querySelector('#btn-submit-quick-task');
+  const handleQuickAdd = async () => {
+    if (!inputQuick || !inputQuick.value.trim()) return;
+    const rawVal = inputQuick.value.trim();
+    const parsed = store.parseTaskInput(rawVal);
+    // Ensure extracted tags exist in store
+    for (const tag of parsed.tags) {
+      await store.addCustomTag(tag);
+    }
+    await store.addTask({
+      title: parsed.title,
+      tags: parsed.tags,
+      priority: parsed.priority,
+      scheduledDate: selectedDate,
+      difficulty: 'easy'
+    });
+    inputQuick.value = '';
+    renderDailyView(container);
+  };
+
+  if (btnSubmitQuick) {
+    btnSubmitQuick.addEventListener('click', handleQuickAdd);
+  }
+  if (inputQuick) {
+    inputQuick.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        handleQuickAdd();
+      }
+    });
+  }
+
+  // View Mode Switches (List vs Matrix)
+  const btnViewList = container.querySelector('#btn-toggle-view-list');
+  if (btnViewList) {
+    btnViewList.addEventListener('click', () => {
+      dailyTasksViewMode = 'list';
+      renderDailyView(container);
+    });
+  }
+
+  const btnViewMatrix = container.querySelector('#btn-toggle-view-matrix');
+  if (btnViewMatrix) {
+    btnViewMatrix.addEventListener('click', () => {
+      dailyTasksViewMode = 'matrix';
+      renderDailyView(container);
+    });
+  }
+
+  // Toggle Pillar Accordion Expand/Collapse
+  container.querySelectorAll('.btn-toggle-pillar-accordion').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const pillarId = btn.dataset.pillarId;
+      if (expandedPillarIds.has(pillarId)) {
+        expandedPillarIds.delete(pillarId);
+      } else {
+        expandedPillarIds.add(pillarId);
+      }
+      renderDailyView(container);
+    });
+  });
+
+  // Toggle Master Pillar Completion
+  container.querySelectorAll('.btn-toggle-master-pillar').forEach((box) => {
+    box.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const pillarId = box.dataset.pillarId;
       await store.togglePillar(pillarId);
       renderDailyView(container);
+    });
+  });
+
+  // Toggle Subtask Completion
+  container.querySelectorAll('.btn-toggle-subtask').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const pillarId = btn.dataset.pillarId;
+      const subtaskId = btn.dataset.subtaskId;
+      await store.togglePillarSubtask(pillarId, subtaskId);
+      renderDailyView(container);
+    });
+  });
+
+  // Delete Subtask
+  container.querySelectorAll('.btn-delete-subtask').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const pillarId = btn.dataset.pillarId;
+      const subtaskId = btn.dataset.subtaskId;
+      if (confirm('¿Eliminar este hábito del pilar?')) {
+        await store.deletePillarSubtask(pillarId, subtaskId);
+        renderDailyView(container);
+      }
+    });
+  });
+
+  // Add New Subtask to Pillar
+  container.querySelectorAll('.btn-submit-new-subtask').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const pillarId = btn.dataset.pillarId;
+      const input = container.querySelector(`.input-new-subtask[data-pillar-id="${pillarId}"]`);
+      if (input && input.value.trim()) {
+        await store.addPillarSubtask(pillarId, input.value.trim());
+        renderDailyView(container);
+      }
+    });
+  });
+
+  container.querySelectorAll('.input-new-subtask').forEach((input) => {
+    input.addEventListener('keydown', async (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const pillarId = input.dataset.pillarId;
+        if (input.value.trim()) {
+          await store.addPillarSubtask(pillarId, input.value.trim());
+          renderDailyView(container);
+        }
+      }
     });
   });
 
@@ -490,8 +765,10 @@ function attachDailyEventListeners(container, selectedDate) {
     box.addEventListener('click', async (e) => {
       e.stopPropagation();
       const taskId = box.dataset.taskId;
-      await store.toggleTask(taskId);
-      renderDailyView(container);
+      if (taskId) {
+        await store.toggleTask(taskId);
+        renderDailyView(container);
+      }
     });
   });
 
@@ -500,7 +777,7 @@ function attachDailyEventListeners(container, selectedDate) {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
       const taskId = btn.dataset.taskId;
-      if (confirm('¿Eliminar esta tarea?')) {
+      if (taskId && confirm('¿Eliminar esta tarea?')) {
         await store.deleteTask(taskId);
         renderDailyView(container);
       }
@@ -537,7 +814,15 @@ function attachDailyEventListeners(container, selectedDate) {
     });
   }
 
-  // Manage Tags Button
+  // Fixed Manage Tags Button (Mobile friendly)
+  const btnManageTagsFixed = container.querySelector('#btn-manage-tags-fixed');
+  if (btnManageTagsFixed) {
+    btnManageTagsFixed.addEventListener('click', () => {
+      window.dispatchEvent(new CustomEvent('kizen-open-modal', { detail: { modal: 'manage-tags' } }));
+    });
+  }
+
+  // Manage Tags Chip in scrollbar
   const btnManageTags = container.querySelector('#btn-manage-tags');
   if (btnManageTags) {
     btnManageTags.addEventListener('click', () => {
@@ -547,7 +832,7 @@ function attachDailyEventListeners(container, selectedDate) {
 }
 
 function filterTaskList(container, tagId) {
-  const items = container.querySelectorAll('#daily-task-list .task-item');
+  const items = container.querySelectorAll('.task-item');
   items.forEach((item) => {
     if (tagId === 'all') {
       item.style.display = 'flex';

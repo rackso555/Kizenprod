@@ -127,6 +127,42 @@ class Store {
     this.notify('xp-gained', { amount, reason, totalXp: this.profile.totalXp });
   }
 
+const DEFAULT_PILLAR_SUBTASKS = {
+  hygiene: [
+    { id: 'h1', title: 'Ducha revitalizante & skincare', xp: 5 },
+    { id: 'h2', title: 'Lavado dental e higiene bucal', xp: 5 },
+    { id: 'h3', title: 'Rutina de cuidado nocturno', xp: 5 }
+  ],
+  workout: [
+    { id: 'w1', title: 'Calentamiento & activación (5-10m)', xp: 5 },
+    { id: 'w2', title: 'Sesión de fuerza / cardio / movilidad', xp: 5 },
+    { id: 'w3', title: 'Estiramiento y respiración', xp: 5 }
+  ],
+  project_work: [
+    { id: 'p1', title: 'Definir el entregable clave de hoy', xp: 5 },
+    { id: 'p2', title: 'Sprint de enfoque profundo (60-90m)', xp: 5 },
+    { id: 'p3', title: 'Guardar avances / commit / registro', xp: 5 }
+  ],
+  japanese: [
+    { id: 'j1', title: 'Repaso de tarjetas Anki / Wanikani', xp: 5 },
+    { id: 'j2', title: 'Estudio de gramática (Bunpro / Libro)', xp: 5 },
+    { id: 'j3', title: 'Inmersión activa / lectura / podcast', xp: 5 }
+  ],
+  skill: [
+    { id: 's1', title: 'Lección o lectura técnica (20m)', xp: 5 },
+    { id: 's2', title: 'Práctica aplicada o ejercicio en código', xp: 5 }
+  ],
+  mindfulness: [
+    { id: 'm1', title: 'Respiración consciente o meditación (5m)', xp: 5 },
+    { id: 'm2', title: 'Pausa reflexiva sin pantallas', xp: 5 }
+  ],
+  environmental_hygiene: [
+    { id: 'e1', title: 'Hacer la cama al despertar', xp: 5 },
+    { id: 'e2', title: 'Escritorio y espacio de trabajo despejado', xp: 5 },
+    { id: 'e3', title: 'Reset ambiental nocturno (orden rápido)', xp: 5 }
+  ]
+};
+
   async loadProfile() {
     let profileDoc = await dbManager.getDoc('user_profile');
     if (!profileDoc) {
@@ -144,14 +180,16 @@ class Store {
             name: 'Daily Hygiene',
             icon: '🧼',
             description: 'Personal & Space/Living Environment',
-            subtext: 'Shower, tidy room, clean workspace'
+            subtext: 'Shower, tidy room, clean workspace',
+            subtasks: DEFAULT_PILLAR_SUBTASKS.hygiene
           },
           {
             id: 'workout',
             name: 'Workout',
             icon: '🏋️',
             description: 'Physical Fitness & Movement',
-            subtext: 'Gym, run, stretch, or calisthenics'
+            subtext: 'Gym, run, stretch, or calisthenics',
+            subtasks: DEFAULT_PILLAR_SUBTASKS.workout
           },
           {
             id: 'project_work',
@@ -159,14 +197,16 @@ class Store {
             icon: '💻',
             description: 'Active Project Focus',
             subtext: 'Project: Kizen System Launch',
-            activeFocus: 'Kizen System'
+            activeFocus: 'Kizen System',
+            subtasks: DEFAULT_PILLAR_SUBTASKS.project_work
           },
           {
             id: 'japanese',
             name: 'Japanese Learning',
             icon: '🗾',
             description: 'Language Study & Kanji Practice',
-            subtext: 'Vocab, Wanikani, grammar or immersion'
+            subtext: 'Vocab, Wanikani, grammar or immersion',
+            subtasks: DEFAULT_PILLAR_SUBTASKS.japanese
           },
           {
             id: 'skill',
@@ -174,21 +214,24 @@ class Store {
             icon: '🎯',
             description: 'Active Skill Development',
             subtext: 'Skill: Modern Web Architecture',
-            activeFocus: 'Web Architecture'
+            activeFocus: 'Web Architecture',
+            subtasks: DEFAULT_PILLAR_SUBTASKS.skill
           },
           {
             id: 'mindfulness',
             name: 'Mindfulness & Stillness',
             icon: '🧘',
             description: 'Meditation & Mindful Reflection',
-            subtext: '5-10m meditation, breathwork, pause'
+            subtext: '5-10m meditation, breathwork, pause',
+            subtasks: DEFAULT_PILLAR_SUBTASKS.mindfulness
           },
           {
             id: 'environmental_hygiene',
             name: 'Environmental Hygiene',
             icon: '🧹',
             description: 'Living Space & Desk Organization',
-            subtext: 'Clean desk, tidy room, laundry & surfaces'
+            subtext: 'Clean desk, tidy room, laundry & surfaces',
+            subtasks: DEFAULT_PILLAR_SUBTASKS.environmental_hygiene
           }
         ]
       };
@@ -204,8 +247,13 @@ class Store {
             name: 'Environmental Hygiene',
             icon: '🧹',
             description: 'Living Space & Desk Organization',
-            subtext: 'Clean desk, tidy room, laundry & surfaces'
+            subtext: 'Clean desk, tidy room, laundry & surfaces',
+            subtasks: DEFAULT_PILLAR_SUBTASKS.environmental_hygiene
           };
+        }
+        if (!p.subtasks || p.subtasks.length === 0) {
+          changed = true;
+          p.subtasks = DEFAULT_PILLAR_SUBTASKS[p.id] || [];
         }
         return p;
       });
@@ -227,26 +275,32 @@ class Store {
         type: 'daily_log',
         date: this.currentLogicalDate,
         pillarsCompleted: [],
+        pillarSubtasksCompleted: {},
         journalText: '',
         gratitudeItems: ['', '', ''],
         totalXpEarned: 0,
         comboBonusClaimed: false
       };
       await dbManager.putDoc(doc);
+    } else if (!doc.pillarSubtasksCompleted) {
+      doc.pillarSubtasksCompleted = {};
     }
     this.dailyLog = doc;
   }
 
   async togglePillar(pillarId) {
-    if (!this.dailyLog) return;
+    if (!this.dailyLog || !this.profile) return;
+    if (!this.dailyLog.pillarSubtasksCompleted) this.dailyLog.pillarSubtasksCompleted = {};
     const isCompleted = this.dailyLog.pillarsCompleted.includes(pillarId);
     const pillar = this.profile.pillars.find((p) => p.id === pillarId);
     const pillarName = pillar ? pillar.name : 'Pillar';
+    const subtasks = pillar?.subtasks || [];
 
     if (!isCompleted) {
       this.dailyLog.pillarsCompleted.push(pillarId);
+      this.dailyLog.pillarSubtasksCompleted[pillarId] = subtasks.map((s) => s.id);
       sfx.playPillarComplete();
-      await this.addXp(15, `Completed ${pillarName}`);
+      await this.addXp(15, `Pilar completado (+15 XP): ${pillarName}`);
 
       // Check if all 7 pillars are completed for the Combo Bonus!
       if (
@@ -263,12 +317,96 @@ class Store {
       }
     } else {
       this.dailyLog.pillarsCompleted = this.dailyLog.pillarsCompleted.filter((id) => id !== pillarId);
+      this.dailyLog.pillarSubtasksCompleted[pillarId] = [];
       this.profile.totalXp = Math.max(0, this.profile.totalXp - 15);
       await dbManager.putDoc(this.profile);
     }
 
     await dbManager.putDoc(this.dailyLog);
     this.notify('daily-log-updated', this.dailyLog);
+  }
+
+  async togglePillarSubtask(pillarId, subtaskId) {
+    if (!this.dailyLog || !this.profile) return;
+    if (!this.dailyLog.pillarSubtasksCompleted) this.dailyLog.pillarSubtasksCompleted = {};
+    if (!this.dailyLog.pillarSubtasksCompleted[pillarId]) this.dailyLog.pillarSubtasksCompleted[pillarId] = [];
+
+    const completedList = this.dailyLog.pillarSubtasksCompleted[pillarId];
+    const isCompleted = completedList.includes(subtaskId);
+    const pillar = this.profile.pillars.find((p) => p.id === pillarId);
+    const subtask = (pillar?.subtasks || []).find((s) => s.id === subtaskId);
+    const subtaskTitle = subtask ? subtask.title : 'Hábito';
+    const subtaskXp = subtask?.xp || 5;
+
+    if (!isCompleted) {
+      completedList.push(subtaskId);
+      sfx.playTaskComplete();
+      await this.addXp(subtaskXp, `Subtarea cumplida (+${subtaskXp} XP): ${subtaskTitle}`);
+
+      // Check if all subtasks of this pillar are completed
+      const allSubtasks = pillar?.subtasks || [];
+      const allDone = allSubtasks.length > 0 && allSubtasks.every((s) => completedList.includes(s.id));
+      if (allDone && !this.dailyLog.pillarsCompleted.includes(pillarId)) {
+        this.dailyLog.pillarsCompleted.push(pillarId);
+        sfx.playPillarComplete();
+        await this.addXp(15, `¡Pilar completado! (+15 XP): ${pillar.name}`);
+
+        if (
+          this.dailyLog.pillarsCompleted.length === this.profile.pillars.length &&
+          !this.dailyLog.comboBonusClaimed
+        ) {
+          this.dailyLog.comboBonusClaimed = true;
+          sfx.playComboBonus();
+          if (typeof confetti === 'function') {
+            confetti({ particleCount: 120, spread: 90, origin: { y: 0.5 } });
+          }
+          await this.addXp(BONUS_XP.PILLAR_COMBO, '7-Pillar Daily Combo Bonus!');
+          this.notify('combo-achieved');
+        }
+      }
+    } else {
+      this.dailyLog.pillarSubtasksCompleted[pillarId] = completedList.filter((id) => id !== subtaskId);
+      this.profile.totalXp = Math.max(0, this.profile.totalXp - subtaskXp);
+
+      // If the parent pillar was completed, unmark it
+      if (this.dailyLog.pillarsCompleted.includes(pillarId)) {
+        this.dailyLog.pillarsCompleted = this.dailyLog.pillarsCompleted.filter((id) => id !== pillarId);
+        this.profile.totalXp = Math.max(0, this.profile.totalXp - 15);
+      }
+      await dbManager.putDoc(this.profile);
+    }
+
+    await dbManager.putDoc(this.dailyLog);
+    this.notify('daily-log-updated', this.dailyLog);
+  }
+
+  async addPillarSubtask(pillarId, title) {
+    if (!this.profile || !title || !title.trim()) return null;
+    const pillar = this.profile.pillars.find((p) => p.id === pillarId);
+    if (!pillar) return null;
+    if (!pillar.subtasks) pillar.subtasks = [];
+    const newSubtask = {
+      id: `sub_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+      title: title.trim(),
+      xp: 5
+    };
+    pillar.subtasks.push(newSubtask);
+    await dbManager.putDoc(this.profile);
+    this.notify('pillars-updated', this.profile.pillars);
+    return newSubtask;
+  }
+
+  async deletePillarSubtask(pillarId, subtaskId) {
+    if (!this.profile) return;
+    const pillar = this.profile.pillars.find((p) => p.id === pillarId);
+    if (!pillar || !pillar.subtasks) return;
+    pillar.subtasks = pillar.subtasks.filter((s) => s.id !== subtaskId);
+    if (this.dailyLog?.pillarSubtasksCompleted?.[pillarId]) {
+      this.dailyLog.pillarSubtasksCompleted[pillarId] = this.dailyLog.pillarSubtasksCompleted[pillarId].filter((id) => id !== subtaskId);
+      await dbManager.putDoc(this.dailyLog);
+    }
+    await dbManager.putDoc(this.profile);
+    this.notify('pillars-updated', this.profile.pillars);
   }
 
   async updatePillarActiveFocus(pillarId, newFocus) {
@@ -372,12 +510,14 @@ class Store {
   async addTask(taskData) {
     const difficulty = taskData.difficulty || 'easy';
     const xpReward = DIFFICULTY_XP[difficulty] || 25;
+    const priority = taskData.priority || 'p2';
     const newTask = {
       _id: `task:${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
       type: 'task',
       title: taskData.title.trim(),
       description: taskData.description || '',
       difficulty,
+      priority,
       xpAwarded: xpReward,
       tags: taskData.tags || [],
       dueDate: taskData.dueDate || '',
@@ -395,6 +535,45 @@ class Store {
     this.tasks.unshift(doc);
     this.notify('tasks-updated', this.tasks);
     return doc;
+  }
+
+  /**
+   * Natural Language Inline Syntax Parser (Todoist/Linear style)
+   * Extracts #tags, priority tokens (p1-p4), and returns clean title
+   */
+  parseTaskInput(rawText) {
+    let text = (rawText || '').trim();
+    const tags = [];
+    let priority = 'p2'; // Default: Important
+
+    // Match priority tokens: p1, p2, p3, p4
+    const pMatch = text.match(/\b(p[1-4]|urgent|prio1|prio2|prio3|prio4)\b/i);
+    if (pMatch) {
+      const pStr = pMatch[1].toLowerCase();
+      if (pStr === 'p1' || pStr === 'urgent' || pStr === 'prio1') priority = 'p1';
+      else if (pStr === 'p2' || pStr === 'prio2') priority = 'p2';
+      else if (pStr === 'p3' || pStr === 'prio3') priority = 'p3';
+      else if (pStr === 'p4' || pStr === 'prio4') priority = 'p4';
+      text = text.replace(pMatch[0], '').trim();
+    }
+
+    // Match tags: #word
+    const tagMatches = text.match(/#[\w\u00C0-\u017F-]+/g);
+    if (tagMatches) {
+      tagMatches.forEach((t) => {
+        tags.push(t.toLowerCase());
+        text = text.replace(t, '').trim();
+      });
+    }
+
+    // Clean up extra spaces
+    text = text.replace(/\s+/g, ' ').trim();
+
+    return {
+      title: text || rawText.trim(),
+      tags,
+      priority
+    };
   }
 
   async toggleTask(taskId) {
@@ -453,27 +632,40 @@ class Store {
     this.customTags = tagsDoc.tags;
   }
 
-  async addCustomTag(label, color = '#38bdf8') {
-    const cleanLabel = label.startsWith('#') ? label : `#${label.trim()}`;
-    const id = cleanLabel.replace('#', '').toLowerCase().replace(/\s+/g, '-');
-    if (this.customTags.some((t) => t.id === id)) return;
+  async addCustomTag(label, color = null) {
+    if (!label || !label.trim()) return null;
+    const cleanLabel = label.startsWith('#') ? label.trim() : `#${label.trim()}`;
+    const id = cleanLabel.replace('#', '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (!id) return null;
 
-    this.customTags.push({ id, label: cleanLabel, color });
-    await dbManager.putDoc({
-      _id: 'custom_tags',
-      type: 'tag_list',
-      tags: this.customTags
-    });
+    let tagsDoc = await dbManager.getDoc('custom_tags');
+    if (!tagsDoc) {
+      tagsDoc = { _id: 'custom_tags', type: 'tag_list', tags: [] };
+    }
+    const tags = tagsDoc.tags || [];
+    if (tags.some((t) => t.id === id)) {
+      this.customTags = tags;
+      return tags.find((t) => t.id === id);
+    }
+
+    const palette = ['#38bdf8', '#f43f5e', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
+    const chosenColor = color || palette[tags.length % palette.length];
+
+    const newTag = { id, label: cleanLabel, color: chosenColor };
+    tags.push(newTag);
+    tagsDoc.tags = tags;
+    await dbManager.putDoc(tagsDoc);
+    this.customTags = tags;
     this.notify('tags-updated', this.customTags);
+    return newTag;
   }
 
   async deleteCustomTag(tagId) {
-    this.customTags = this.customTags.filter((t) => t.id !== tagId);
-    await dbManager.putDoc({
-      _id: 'custom_tags',
-      type: 'tag_list',
-      tags: this.customTags
-    });
+    let tagsDoc = await dbManager.getDoc('custom_tags');
+    if (!tagsDoc) return;
+    tagsDoc.tags = (tagsDoc.tags || []).filter((t) => t.id !== tagId);
+    await dbManager.putDoc(tagsDoc);
+    this.customTags = tagsDoc.tags;
     this.notify('tags-updated', this.customTags);
   }
 
