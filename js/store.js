@@ -15,6 +15,42 @@ import {
   sfx
 } from './gamification.js';
 
+export const DEFAULT_PILLAR_SUBTASKS = {
+  hygiene: [
+    { id: 'h1', title: 'Ducha revitalizante & skincare', xp: 5 },
+    { id: 'h2', title: 'Lavado dental e higiene bucal', xp: 5 },
+    { id: 'h3', title: 'Rutina de cuidado nocturno', xp: 5 }
+  ],
+  workout: [
+    { id: 'w1', title: 'Calentamiento & activación (5-10m)', xp: 5 },
+    { id: 'w2', title: 'Sesión de fuerza / cardio / movilidad', xp: 5 },
+    { id: 'w3', title: 'Estiramiento y respiración', xp: 5 }
+  ],
+  project_work: [
+    { id: 'p1', title: 'Definir el entregable clave de hoy', xp: 5 },
+    { id: 'p2', title: 'Sprint de enfoque profundo (60-90m)', xp: 5 },
+    { id: 'p3', title: 'Guardar avances / commit / registro', xp: 5 }
+  ],
+  japanese: [
+    { id: 'j1', title: 'Repaso de tarjetas Anki / Wanikani', xp: 5 },
+    { id: 'j2', title: 'Estudio de gramática (Bunpro / Libro)', xp: 5 },
+    { id: 'j3', title: 'Inmersión activa / lectura / podcast', xp: 5 }
+  ],
+  skill: [
+    { id: 's1', title: 'Lección o lectura técnica (20m)', xp: 5 },
+    { id: 's2', title: 'Práctica aplicada o ejercicio en código', xp: 5 }
+  ],
+  mindfulness: [
+    { id: 'm1', title: 'Respiración consciente o meditación (5m)', xp: 5 },
+    { id: 'm2', title: 'Pausa reflexiva sin pantallas', xp: 5 }
+  ],
+  environmental_hygiene: [
+    { id: 'e1', title: 'Hacer la cama al despertar', xp: 5 },
+    { id: 'e2', title: 'Escritorio y espacio de trabajo despejado', xp: 5 },
+    { id: 'e3', title: 'Reset ambiental nocturno (orden rápido)', xp: 5 }
+  ]
+};
+
 class Store {
   constructor() {
     this.profile = null;
@@ -126,42 +162,6 @@ class Store {
 
     this.notify('xp-gained', { amount, reason, totalXp: this.profile.totalXp });
   }
-
-const DEFAULT_PILLAR_SUBTASKS = {
-  hygiene: [
-    { id: 'h1', title: 'Ducha revitalizante & skincare', xp: 5 },
-    { id: 'h2', title: 'Lavado dental e higiene bucal', xp: 5 },
-    { id: 'h3', title: 'Rutina de cuidado nocturno', xp: 5 }
-  ],
-  workout: [
-    { id: 'w1', title: 'Calentamiento & activación (5-10m)', xp: 5 },
-    { id: 'w2', title: 'Sesión de fuerza / cardio / movilidad', xp: 5 },
-    { id: 'w3', title: 'Estiramiento y respiración', xp: 5 }
-  ],
-  project_work: [
-    { id: 'p1', title: 'Definir el entregable clave de hoy', xp: 5 },
-    { id: 'p2', title: 'Sprint de enfoque profundo (60-90m)', xp: 5 },
-    { id: 'p3', title: 'Guardar avances / commit / registro', xp: 5 }
-  ],
-  japanese: [
-    { id: 'j1', title: 'Repaso de tarjetas Anki / Wanikani', xp: 5 },
-    { id: 'j2', title: 'Estudio de gramática (Bunpro / Libro)', xp: 5 },
-    { id: 'j3', title: 'Inmersión activa / lectura / podcast', xp: 5 }
-  ],
-  skill: [
-    { id: 's1', title: 'Lección o lectura técnica (20m)', xp: 5 },
-    { id: 's2', title: 'Práctica aplicada o ejercicio en código', xp: 5 }
-  ],
-  mindfulness: [
-    { id: 'm1', title: 'Respiración consciente o meditación (5m)', xp: 5 },
-    { id: 'm2', title: 'Pausa reflexiva sin pantallas', xp: 5 }
-  ],
-  environmental_hygiene: [
-    { id: 'e1', title: 'Hacer la cama al despertar', xp: 5 },
-    { id: 'e2', title: 'Escritorio y espacio de trabajo despejado', xp: 5 },
-    { id: 'e3', title: 'Reset ambiental nocturno (orden rápido)', xp: 5 }
-  ]
-};
 
   async loadProfile() {
     let profileDoc = await dbManager.getDoc('user_profile');
