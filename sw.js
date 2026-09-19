@@ -1,4 +1,4 @@
-const CACHE_NAME = 'kizen-app-v6';
+const CACHE_NAME = 'kizen-app-v7';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
@@ -45,6 +45,7 @@ self.addEventListener('activate', (event) => {
       return Promise.all(
         keys.map((key) => {
           if (key !== CACHE_NAME) {
+            console.log('Clearing old cache:', key);
             return caches.delete(key);
           }
         })
@@ -53,7 +54,9 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Cache-First strategy: Return cached files immediately so phone NEVER hangs when PC is off
+// Network-First with Cache Fallback strategy:
+// Ensures phones and browsers ALWAYS load the latest updates instantly when connected to internet,
+// while gracefully falling back to cached assets when completely offline.
 self.addEventListener('fetch', (event) => {
   // CouchDB sync endpoint requests pass through directly
   if (event.request.url.includes(':5984') || event.request.method !== 'GET') {
@@ -61,32 +64,20 @@ self.addEventListener('fetch', (event) => {
   }
 
   event.respondWith(
-    caches.match(event.request, { ignoreSearch: true }).then((cachedResponse) => {
-      if (cachedResponse) {
-        // Return instantly from cache
-        // Silently try background update without blocking
-        fetch(event.request).then((networkResponse) => {
-          if (networkResponse && networkResponse.status === 200) {
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, networkResponse));
-          }
-        }).catch(() => {
-          // PC is offline; ignore silently
-        });
-        return cachedResponse;
-      }
-
-      // If not in cache, try network
-      return fetch(event.request).then((networkResponse) => {
+    fetch(event.request)
+      .then((networkResponse) => {
         if (networkResponse && networkResponse.status === 200) {
           const responseClone = networkResponse.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(event.request, responseClone));
         }
         return networkResponse;
-      }).catch(() => {
-        // Fallback to cached index.html
-        return caches.match('./index.html');
-      });
-    })
+      })
+      .catch(() => {
+        // Offline fallback: load from Cache Storage
+        return caches.match(event.request, { ignoreSearch: true }).then((cachedResponse) => {
+          return cachedResponse || caches.match('./index.html');
+        });
+      })
   );
 });
 

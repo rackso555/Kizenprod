@@ -9,9 +9,40 @@
   <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#080c14">
   <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Kizen">
   <meta name="description" content="Local-first gamified productivity system with 7 daily pillars, cascading goals, and PC sync.">
+
+  <!-- Self-Healing Cache Watchdog & Recovery -->
+  <script>
+    window.__kizen_clean_cache = function() {
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistrations().then(function(regs) {
+          for (var r of regs) r.unregister();
+        });
+      }
+      if ('caches' in window) {
+        caches.keys().then(function(keys) {
+          Promise.all(keys.map(function(k) { return caches.delete(k); })).then(function() {
+            window.location.reload(true);
+          });
+        });
+      } else {
+        window.location.reload(true);
+      }
+    };
+
+    window.addEventListener('load', function() {
+      setTimeout(function() {
+        var daily = document.getElementById('view-daily');
+        if (daily && daily.children.length === 0) {
+          var fallback = document.getElementById('kizen-fallback-box');
+          if (fallback) fallback.style.display = 'block';
+        }
+      }, 2000);
+    });
+  </script>
 
   <!-- Core & Component Stylesheets -->
   <link rel="stylesheet" href="css/main.css">
@@ -49,6 +80,15 @@
 
   <!-- Main View Screens Container -->
   <main class="app-container">
+    <!-- Fallback Emergency Banner (visible only if stale/broken JS cache is stuck) -->
+    <div id="kizen-fallback-box" style="display: none; padding: 20px; text-align: center; background: rgba(56, 189, 248, 0.08); border: 1px solid var(--color-primary); border-radius: var(--radius-md); margin: 20px 14px;">
+      <div style="font-size: 1.1rem; font-weight: 700; margin-bottom: 8px; color: var(--color-primary);">⚡ Nueva Versión de Kizen Disponible</div>
+      <p style="font-size: 0.84rem; color: var(--text-secondary); margin-bottom: 16px;">Detectamos una versión previa en la memoria del navegador. Presiona abajo para activar de inmediato el nuevo centro de mando y los 7 pilares.</p>
+      <button onclick="window.__kizen_clean_cache()" class="btn btn-primary" style="padding: 10px 20px; font-weight: bold; font-size: 0.9rem;">
+        🔄 Actualizar y Recargar Ahora
+      </button>
+    </div>
+
     <div id="view-daily" class="view-container active"></div>
     <div id="view-weekly" class="view-container"></div>
     <div id="view-monthly" class="view-container"></div>
@@ -98,6 +138,6 @@
   <!-- Bundled Offline Libraries & Main Application Script -->
   <script src="js/lib/pouchdb.min.js"></script>
   <script src="js/lib/confetti.browser.min.js"></script>
-  <script type="module" src="js/app.js"></script>
+  <script type="module" src="js/app.js?v=7"></script>
 </body>
 </html>
